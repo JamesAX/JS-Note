@@ -1,0 +1,1939 @@
+/*global jQuery:false */
+/*global $:false */
+/*global sap:false */
+/*global localStorage:false */
+/*global huawei:false */
+/*global console:false */
+/*global window:false */
+/*global setInterval:false */
+/*global clearInterval:false */
+/*global location:false */
+(function() {
+  'use strict';
+
+  //Get the region map config data
+  jQuery.sap.require('huawei.cmes.util.parameters.RegionMapParameters');
+  //Get the popover location and other infomation
+  jQuery.sap.require('huawei.cmes.util.parameters.SupplierParameters');
+  //Get the title of charts
+  jQuery.sap.require('huawei.cmes.util.parameters.ChartsTitleMapParameters');
+  //Get the authorization functions
+  jQuery.sap.require("huawei.cmes.util.settings.Authorization");
+  //Get dashboard settings
+  jQuery.sap.require('huawei.cmes.util.settings.DashboardSettings');
+  //Get formatters
+  jQuery.sap.require('huawei.cmes.util.commons.Formatters');
+  //Get chart helper js
+  jQuery.sap.require('huawei.cmes.util.chart.Helper');
+  //Get China map module
+  jQuery.sap.require('huawei.cmes.control.D3Map.ChinaD3Map');
+  //Get http related functino module
+  jQuery.sap.require('huawei.cmes.util.services.Http');
+  //Get message toast module
+  jQuery.sap.require('sap.m.MessageToast');
+  //Get service provider module
+  jQuery.sap.require('huawei.cmes.util.services.Provider');
+  //Get proxy module
+  jQuery.sap.require('huawei.cmes.util.services.Proxy');
+  //Get proxy related module
+  jQuery.sap.require('huawei.cmes.control.Dialog.SelectDialog');
+  //Get message realted module
+  jQuery.sap.require('sap.ca.ui.message.message');
+
+  //Global Varables
+  //HTTP functions
+  var HTTP = huawei.cmes.util.http;
+  //Helper functions
+  var HELPER = huawei.cmes.util.commons.Helper;
+  //Chart helper functions
+  var CHART_HELPER = huawei.cmes.util.chart.Helper;
+  //get current selected year
+  var YEAR = localStorage.getItem('YEAR') || '2014';
+
+  sap.ui.controller('huawei.cmes.dashboard.view.ChinaOverviewPage', {
+
+    _selectedItems: [],
+    _selectedOrg: '',
+    _filterDateType: sap.oBundle.getText('MONTH'),
+    _networkgensDataset: [],
+
+    onInit: function(evt) {
+      //Language Setting
+      if (sap.sLocale === undefined) {
+        sap.sLocale = localStorage.getItem('LANG-KEY') || '';
+      }
+      //Get the translation resourse
+      this.oBundle = jQuery.sap.resources({
+        url: "i18n/messageBundle.properties",
+        locale: sap.sLocale
+      });
+
+      //If the location is en-US else not
+      if (sap.sLocale === 'en-US') {
+        //If en-US, record a dashboard-card-en-us
+        sap.ui.getCore().getConfiguration().setLanguage('en-US');
+      } else {
+        //Else record a dashboard-card-ch-cn
+        sap.ui.getCore().getConfiguration().setLanguage('zh-CN');
+      }
+      //i18n translation
+      var china_overview_network = this.oBundle.getText(
+        'china_overview_network');
+      this.getView().byId('overviewPageName').setText(
+        china_overview_network);
+
+      //this.accessCheck("PAGE","OVERVIEW");
+      // keep reference to event bus
+      if (!this._ofilterPopover) {
+        this._ofilterPopover = sap.ui.xmlfragment(
+          'huawei.cmes.fragment.overview.overviewFilterPopover', this);
+        this.getView().addDependent(this._ofilterPopover);
+      }
+      // var datepickerInit =
+      // sap.ui.getCore().byId('overviewCNfilterDateStart');
+      this.bus = sap.ui.getCore().getEventBus();
+      this._selectedDateType = 'MONTH';
+      // by default, international regions only have terminal category
+      this._sCategory = 'network';
+
+      //Charts in China View Page
+      var chart2 = this.getView().byId('chart2');
+      var chart3 = this.getView().byId('chart3');
+      var chart4 = this.getView().byId('chart4');
+      var chart5 = this.getView().byId('chart5');
+
+      //Call the CHART_HELPER.onSelectData function when the chart is selected
+      chart2.attachSelectData(CHART_HELPER.onSelectData);
+      chart3.attachSelectData(CHART_HELPER.onSelectData);
+      chart4.attachSelectData(CHART_HELPER.onSelectData);
+      chart5.attachSelectData(CHART_HELPER.onSelectData);
+
+      //Remove the top label on Y
+      //For percentage chart only
+      var rerenderAndRemoveLabelOnY = function() {
+        CHART_HELPER.removeTopLabelOnY('marker-remove-top-label-on-y');
+        CHART_HELPER.onDeSelectRerender.apply(this);
+      };
+
+      //Call the CHART_HELPER.deSelectData function when the chart is deselectData
+      chart2.attachDeselectData(CHART_HELPER.onDeSelectRerender);
+      chart3.attachDeselectData(CHART_HELPER.onDeSelectRerender);
+      chart4.attachDeselectData(rerenderAndRemoveLabelOnY);
+      chart5.attachDeselectData(rerenderAndRemoveLabelOnY);
+
+      /*
+       * ################################################################### Add
+       * recurring functions
+       * ###################################################################
+       */
+      // keep 'that' reference to this controller
+      var that = this;
+
+      that.loadChartData = function() {
+
+        // Set Title
+        var chartsName = huawei.cmes.util.parameters.ChartsTitleMapParameters;
+        for (var i = 1; i <= 5; i++) {
+          that.byId('PopoverTextView' + i)
+            .setText(chartsName.region[that._sRegionId][that._sCategory]['chart' + i].name);
+        }
+
+        // this._obusyDialog.close();
+      };
+
+      //TODO
+      // onBeforeShow, onBeforeHide hooks fires on control View
+      var oView = this.getView();
+      oView.addEventDelegate({
+        onBeforeShow: function(evt) {
+          // console.log('ChinaOverviewPage onBeforeShow');
+
+          // keep regionId in controller
+          this._sRegionId = 'CN';
+          that.dataType = evt.data.dataType;
+
+          // refresh reference to setting model
+          // this._oSettingModel.setData(huawei.cmes.util.settings.DashboardSettings);
+
+          var mRegionMapParameter = huawei.cmes.util.parameters.RegionMapParameters[
+            this._sRegionId];
+          //Create the China D3 Map
+          var oD3Map = new huawei.cmes.control.D3Map.ChinaD3Map({
+            cellWidth: 500, // 400
+            cellHeight: 450, // 360
+            modelPath: './model/mapData/' + this._sRegionId + '.json',
+            geoScale: mRegionMapParameter.geoScale,
+            rotateX: mRegionMapParameter.rotateX,
+            rotateY: mRegionMapParameter.rotateY
+          });
+          //Remove all content in the map container
+          this.byId('mapContainer').removeAllItems();
+          //Add the D3 map - in this way. refresh the d3 map
+          this.byId('mapContainer').addItem(oD3Map);
+
+          //set parameter for per chart
+          this.packDefaultFilter();
+          // Create charts
+          this.createChart1();
+          //Refresh chart
+          this.refreshChart2_5AfterFilter();
+          //Refresh chart
+          this.refreshChart1AfterFilter();
+
+          // set charts' title
+          this.loadChartData();
+
+          //load card data nearby china map 
+          this.initgensDataSet();
+
+          //Remove the top label when the window is resized
+          $(window).resize(function() {
+            CHART_HELPER.removeTopLabelOnY('marker-remove-top-label-on-y');
+          });
+        },
+
+      }, this);
+      //Since the popover cannot disappear in the next page
+      //Check their existence and delete them
+      sap.deletePopover = setInterval(function() {
+
+        var isCN = location.href.indexOf('html#/CN');
+        //If it is China page
+        if ($('.pop-over').css('visibility') === 'visible' && isCN !== -1) {
+          $('.pop-over').hide();
+        }
+      }, 100);
+
+    },
+
+    onBeforeShow: function(evt) {},
+    /**
+     * Ajax Get Method
+     *
+     * @param url
+     * @param model
+     * @param func
+     */
+    ajaxGet: HTTP.ajaxGet,
+
+    /**
+     * Ajax Post Method
+     *
+     * @param url
+     * @param func
+     * @param model
+     */
+    ajaxPost: HTTP.ajaxPost,
+
+    /**
+     * process the raw data
+     * @param  {Object} data
+     * @return {Object} processed data
+     */
+    handleGensDataSet: function(data) {
+      //Network config array
+      var networkArray = [];
+      //Terminal config array
+      var terminalArray = [];
+      //Get the translation bundle
+      var oBundle = this.oBundle;
+      //Put this in that
+      var that = this;
+
+      //According to the data, arrange them to seperate groups
+      data.forEach(function(item) {
+        if (item.TYPE === '0') { // network
+          switch (item.KPI_NAME) {
+            case 'TPY': //直通率
+              networkArray.push({
+                VALUE: oBundle.getText('StraightRate') + ': ' + parseFloat(
+                  item.VALUE).toFixed(2) + '%'
+              });
+              break;
+            case 'MMIN':
+              networkArray.push({
+                VALUE: oBundle.getText('BatchQualityProblem') + ': ' +
+                  item.VALUE + oBundle.getText('UnitOfCustomerComplain')
+              });
+              break;
+            case 'CCN':
+              networkArray.push({
+                VALUE: oBundle.getText('CustomercomplaintIndex') + ': ' +
+                  item.VALUE + oBundle.getText('UnitOfCustomerComplain')
+              });
+              break;
+            case 'BSC':
+              if (item.PROD_FORM === '半成品') { //半成品
+                networkArray.push({
+                  VALUE: oBundle.getText('LifeCycleMaterial') + ': ' + //周期/(半成品)
+                    parseFloat(item.VALUE).toFixed(2) + oBundle.getText(
+                      'UnitOfPeriodDay')
+                });
+              } else if (item.PROD_FORM === '整机') {
+                networkArray.push({
+                  VALUE: oBundle.getText('LifeCycleFinish') + ': ' + //周期/(整机)
+                    parseFloat(item.VALUE).toFixed(2) + oBundle.getText(
+                      'UnitOfPeriodDay')
+                });
+              }
+              break;
+            default:
+              break;
+          }
+        } else { // terminal
+          switch (item.KPI_NAME) {
+            case 'TPY':
+              terminalArray.push({
+                VALUE: oBundle.getText('StraightRate') + ': ' + parseFloat(
+                  item.VALUE).toFixed(2) + '%'
+              });
+              break;
+            case 'MMIN':
+              terminalArray.push({
+                VALUE: oBundle.getText('BatchQualityProblem') + ': ' +
+                  item.VALUE + oBundle.getText('UnitOfCustomerComplain')
+              });
+              break;
+            case 'CCN':
+              terminalArray.push({
+                VALUE: oBundle.getText('CustomercomplaintIndex') + ': ' +
+                  item.VALUE + oBundle.getText('UnitOfCustomerComplain')
+              });
+              break;
+            case 'BSC':
+              if (item.PROD_FORM === '整机') { //整机
+                terminalArray.push({
+                  VALUE: oBundle.getText('LifeCycleFinish') + ': ' + parseFloat(
+                    item.VALUE).toFixed(2) + oBundle.getText('UnitOfPeriodDay')
+                });
+              } else if (item.PROD_FORM === '其他') {
+                terminalArray.push({
+                  VALUE: oBundle.getText('LifeCycleOther') + ': ' + parseFloat(
+                    item.VALUE).toFixed(2) + oBundle.getText('UnitOfPeriodDay')
+                });
+              }
+              break;
+            default:
+              break;
+          }
+        }
+      });
+      //Put each group data to each group dataset
+      that._networkgensDataset = networkArray;
+      that._terminalgensDataset = terminalArray;
+      if (this._sCategory === 'network') {
+        return networkArray;
+      } else {
+        return terminalArray;
+      }
+      //Init tooltip for charts
+      setTimeout(function() {
+        CHART_HELPER.initTooltip();
+      }, 500);
+    },
+
+    /**
+     * Set initial model data
+     */
+    initgensDataSet: function() {
+      var that = this;
+      //Initial data Service
+      var gensService = huawei.cmes.util.services.Provider.OverviewService.OVERVIEWCNGENSERVICES;
+
+      //Initial start date
+      var startDate = this.getCorrectDateFormat(this._defaultFilterDatepickerStartValue);
+      //Initial end date
+      var endDate = this.getCorrectDateFormat(this._defaultFilterDatepickerEndValue);
+      //Intial filter 
+      var sFilter = '?sDate=' + startDate + '&eDate=' + endDate;
+      //this._filterDateType  whether need to add filter datetype as xsjs parameters?
+
+      //Initial data url
+      var url = huawei.cmes.util.services.Proxy.XsjsProxy(gensService, sFilter);
+
+      var viewModel = new sap.ui.model.json.JSONModel();
+      this.getView().setModel(viewModel); // set view the empty model
+
+      //var gensDataSet = this.getjsonDataset(gensService);
+
+      var dataHandler = function(data, model) {
+        var modelData = that.handleGensDataSet(data); // get the data from service
+        model.setData(modelData); // set the data to the empty model
+        setTimeout(function() {
+          CHART_HELPER.initTooltip(); // initialize the tooltip
+        }, 500);
+      };
+      //      console.log(url);
+      /** */
+      this.ajaxGet(url, viewModel, dataHandler); //start the ajax call
+
+    },
+
+    /* set default latest year period, start date and end date 315717*/
+    /**
+     * Get last day of month
+     * @param  {String} year
+     * @param  {String} month
+     * @return {String}
+     */
+    getLastDay: function(year, month) {
+      var currentDate = new Date();
+      var new_year = currentDate.getFullYear(); // get current year
+      var new_month = currentDate.getMonth(); //get current month  
+
+      var new_date = new Date(new_year, new_month, 1); //取当年当月中的第一天  
+      return (new Date(new_date.getTime() - 1000 * 60 * 60 * 24)).getDate(); //获取当月最后一天日期  
+    },
+
+    /**
+     * Get Default last year
+     */
+    getDefaultLatestYear: function() {
+      //initialize the Data object
+      var currentDate = new Date();
+      //Get the year, month, day
+      this._currentYear = currentDate.getFullYear(); // year
+      this._currentMonth = currentDate.getMonth() + 1; // 1-12 month
+      this._currentDate = currentDate.getDate(); // day
+      //Get the default date string
+      switch (this._currentMonth) {
+        case 1:
+          this._defaultPeriod_R = this._currentYear - 1 + '-' + '12-31';
+          this._defaultFilterDatepickerStartValue = (this._currentYear - 1).toString() + '-' + this.dateChange(this._currentMonth - 1) + '-01';
+          this._defaultFilterDatepickerEndValue = (this._currentYear - 1).toString() + '-12-31';
+          this._defaultPeriod_H = this._currentYear - 1 + '-' + '1-1';
+          this.showDate();
+          break;
+        default:
+          this._defaultPeriod_R = this._currentYear + '-' + (this._currentMonth - 1) + '-' + this._currentDate;
+          this._defaultFilterDatepickerStartValue = (this._currentYear - 1).toString() + '-' + this.dateChange(this._currentMonth - 1) + '-01';
+          this._defaultFilterDatepickerEndValue = this._currentYear.toString() + '-' + this.dateChange(this._currentMonth) + '-' + this.dateChange(this._currentDate);
+          this._defaultPeriod_H = this._currentYear - 1 + '-' + '1-1';
+          this.showDate();
+          break;
+      }
+    },
+
+    /**
+     * Show date period on the right upper place
+     */
+    showDate: function() {
+      //Get the default period text
+      var showPeriodText = this._filterDateType;
+      //The date type mapping
+      switch (this._filterDateType) {
+        case '年':
+          showPeriodText = 'YEAR';
+          break;
+        case '月':
+          showPeriodText = 'MONTH';
+          break;
+        case '日':
+          showPeriodText = 'DAY';
+          break;
+        case '周':
+          showPeriodText = 'WEEK';
+          break;
+      }
+      //Get the translation
+      var showDateSelect = this.oBundle.getText('TimePeriod');
+      //Get the start date
+      var startDate = this._selectedStartDate === undefined ?
+        this._defaultFilterDatepickerStartValue : this._selectedStartDate;
+      //Get the end date
+      var endDate = this._selectedEndDate === undefined ?
+        this._defaultFilterDatepickerEndValue : this._selectedEndDate;
+      //Get the date to display
+      //Spell the date string
+      showDateSelect += HELPER.getDisplayDate(showPeriodText, startDate);
+      showDateSelect += " - " + HELPER.getDisplayDate(showPeriodText, endDate);
+      /*showDateSelect += (this._defaultFilterDatepickerStartValue + ' - ' +
+        this._defaultFilterDatepickerEndValue);*/
+      showDateSelect += ' | ';
+      showDateSelect += this.oBundle.getText('TimeUnit');
+      showDateSelect += this.oBundle.getText(showPeriodText);
+      //Show the text to show
+      this.byId('dashboardFilterDate').setText(showDateSelect);
+    },
+
+    /**
+     * make up single bit data - month/5 to month/05
+     * @param  {String} date
+     * @return {String}
+     */
+    dateChange: function(date) {
+      //1 - 9 to '01'- '09'
+      if (date < 10) {
+        return '0' + date.toString();
+      } else
+        return date.toString();
+    },
+
+    /* pack default filter dataset for chart3,chart4 and chart5 */
+    packDefaultFilter: function() {
+      this.getDefaultLatestYear();
+      /* init this._filterChart2 KPI_AGG:'CCR'/'CCN' */
+      this._filterChart2 = {
+        DATE: {},
+        DIMENSIONS: {
+          AREA: [],
+          BG: []
+        },
+        KPI: {},
+      };
+      /* init this._filterChart3 */
+      this._filterChart3 = {
+        DATE: {},
+        DIMENSIONS: {
+          AREA: [],
+          BG: [],
+          PRODUCT_FORM: []
+        },
+        KPI: {},
+      };
+      /* init this._filterChart4 */
+      this._filterChart4 = {
+        DATE: {},
+        DIMENSIONS: {
+          AREA: [],
+          BG: [],
+          FACTORY: []
+        },
+        KPI: {},
+      };
+
+      /* init this._filterChart5 */
+      this._filterChart5 = {
+        DATE: {},
+        DIMENSIONS: {
+          AREA: [],
+          BG: [],
+          FACTORY: []
+        },
+        KPI: {},
+      };
+
+      /* Set DATE */
+      this._filterChart2.DATE.START_DATE = this._defaultFilterDatepickerStartValue; //this._defaultPeriod_H;
+      this._filterChart2.DATE.END_DATE = this._defaultFilterDatepickerEndValue; //this._defaultPeriod_R;
+      this._filterChart2.DATE.TYPE = 'MONTH';
+
+      this._filterChart3.DATE.START_DATE = this._defaultFilterDatepickerStartValue; //this._defaultPeriod_H;
+      this._filterChart3.DATE.END_DATE = this._defaultFilterDatepickerEndValue; //this._defaultPeriod_R;
+      this._filterChart3.DATE.TYPE = 'MONTH';
+
+      this._filterChart4.DATE.START_DATE = this._defaultFilterDatepickerStartValue; //this._defaultPeriod_H;
+      this._filterChart4.DATE.END_DATE = this._defaultFilterDatepickerEndValue; //this._defaultPeriod_R;
+      this._filterChart4.DATE.TYPE = 'MONTH';
+
+      this._filterChart5.DATE.START_DATE = this._defaultFilterDatepickerStartValue; //this._defaultPeriod_H;
+      this._filterChart5.DATE.END_DATE = this._defaultFilterDatepickerEndValue; //this._defaultPeriod_R;
+      this._filterChart5.DATE.TYPE = 'MONTH';
+
+      //TODO
+      var bg = [];
+      var area = [];
+      var pform = [];
+      //Default value
+      area.push({
+        ID: '深圳供应中心',
+        NAME: '深圳供应中心'
+      });
+
+      var bgNetwork = [{
+        ID: '泛网络',
+        NAME: '泛网络'
+      }];
+      var bgTerminal = [{
+        ID: '终端',
+        NAME: '终端'
+      }];
+      var chart2KPI = {
+        'KPI_AGG': 'CCN',
+        'PAGE_ID': 'B1'
+      };
+      pform.push({
+        ID: '整机',
+        NAME: '整机'
+      });
+
+      //TODO
+
+      var kpiAgg = 'TCC';
+
+      if (this.dataType === 'CN-network') {
+        kpiAgg = 'FCC';
+        this._sCategory = 'network';
+        chart2KPI = {
+          'KPI_AGG': 'CCR',
+          'PAGE_ID': 'B1'
+        };
+        bg = bgNetwork;
+        var china_overview_network = this.oBundle.getText(
+          'china_overview_network');
+        this.getView().byId('overviewPageName').setText(
+          china_overview_network);
+      } else {
+        kpiAgg = 'TCC';
+        this._sCategory = 'terminal';
+        chart2KPI = {
+          'KPI_AGG': 'CCN',
+          'PAGE_ID': 'B1'
+        };
+        bg = bgTerminal;
+        var china_overview_terminal = this.oBundle.getText(
+          'china_overview_terminal');
+        this.getView().byId('overviewPageName').setText(
+          china_overview_terminal);
+      }
+
+      this._filterChart2.DIMENSIONS.AREA = area;
+      this._filterChart2.DIMENSIONS.BG = bg;
+      this._filterChart2.KPI = chart2KPI;
+
+      this._filterChart3.DIMENSIONS.AREA = area;
+      this._filterChart3.DIMENSIONS.BG = bg;
+      this._filterChart3.DIMENSIONS.PRODUCT_FORM = pform;
+      this._filterChart3.KPI = {
+        'KPI_AGG': kpiAgg,
+        'PAGE_ID': 'B1'
+      };
+
+      this._filterChart4.DIMENSIONS.AREA = area;
+      this._filterChart4.DIMENSIONS.BG = bg;
+      this._filterChart4.KPI = {
+        'KPI_AGG': 'LAR',
+        'PAGE_ID': 'B1'
+      };
+
+      this._filterChart5.DIMENSIONS.AREA = area;
+      this._filterChart5.DIMENSIONS.BG = bg;
+      this._filterChart5.KPI = {
+        'KPI_AGG': 'TPY',
+        'PAGE_ID': 'B1'
+      };
+
+      /* load org and factory data */
+      var orgFactoryService = huawei.cmes.util.services.Provider.OverviewService
+        .ORGFACTORYSERVICE;
+
+      // var orgFactoryDataSet = this.getjsonDataset(orgFactoryService);
+      // var orgDataSet = this.getOrgDataSet(orgFactoryDataSet);
+
+      this._orgModel = new sap.ui.model.json.JSONModel();
+      this._factoryModel = new sap.ui.model.json.JSONModel();
+
+      // this._orgModel.setData(orgDataSet, false);
+      // this._factoryModel.setData(orgFactoryDataSet, false);
+
+      this._filterChart3.DIMENSIONS.FACTORY = this.factoryListNetwork;
+      this._filterChart5.DIMENSIONS.FACTORY = this.factoryListNetwork;
+      this._filterChart4.DIMENSIONS.FACTORY = this.factoryListNetwork;
+
+      //if (this._filterChart4.KPI.KPI_AGG == 'LAR'){
+      //      huawei.cmes.util.chart.Helper.setChartYAxisScale(this._filterChart4, 0, 100,"","",false,false);
+      //}//00315717
+
+      var that = this;
+      var dataHandler = function(data, models) {
+        models[0].setData(data);
+        var orgDataSet = that.getOrgDataSet(data);
+        models[1].setData(orgDataSet);
+        setTimeout(function() {
+          CHART_HELPER.initTooltip();
+        }, 500);
+      };
+      //url
+      var url = huawei.cmes.util.services.Proxy.XsjsProxy(orgFactoryService);
+      //Start ajax call
+      this.ajaxGet(url, [this._factoryModel, this._orgModel], dataHandler);
+
+      //Refresh model of chart 1 | right bottom chart
+      this.refreshChart1AfterFilter();
+      //Refresh models of chart2 chart3 chart4 chart5
+      this.refreshChart2_5AfterFilter();
+      //Get chart configuration
+      this.loadChartData();
+    },
+
+    /**
+     * Not use
+     */
+    handlePlayButton: function() {
+      var oSettingData = this._oSettingModel.getData();
+
+      // if current refreshOn is false
+      if (!oSettingData.cycleOn) {
+        // start cycling
+        this.startCycle();
+      } else {
+        // stop refresh
+        this.stopCycle();
+      }
+    },
+    /**
+     * Not use
+     */
+    startCycle: function() {
+      // prepare new interval
+      var regions = huawei.cmes.util.settings.DashboardSettings.regions;
+      var cycleRegions = [];
+      for (var key in regions) {
+        if (regions.hasOwnProperty(key)) {
+          if (regions[key]) {
+            cycleRegions.push(key);
+          }
+        }
+      }
+      huawei.cmes.util.settings.DashboardSettings.cycleRegions =
+        cycleRegions;
+      huawei.cmes.util.settings.DashboardSettings.cycleCounter =
+        cycleRegions.length;
+
+      // get refresh parameters
+      var cycleInterval = +huawei.cmes.util.settings.DashboardSettings.cycleInterval;
+
+      // fire cycle interval
+      huawei.cmes.util.settings.DashboardSettings.cycleIntervalId =
+        setInterval(huawei.cmes.util.settings.Automation.cyclePage, 2 *
+          cycleInterval * 1000);
+
+      huawei.cmes.util.settings.DashboardSettings.cycleOn = true;
+
+      // update the local data model of global settings
+      this._oSettingModel.setData(huawei.cmes.util.settings.DashboardSettings);
+    },
+    /**
+     * Not use
+     */
+    stopCycle: function() {
+      //Stop the interval
+      clearInterval(huawei.cmes.util.settings.DashboardSettings.cycleIntervalId);
+      //Stop the interval
+      clearInterval(this._cycleCategoryIntervalId);
+
+      huawei.cmes.util.settings.DashboardSettings.cycleOn = false;
+      //Set data to model
+      this._oSettingModel.setData(huawei.cmes.util.settings.DashboardSettings);
+    },
+
+    /**
+     * Create chart1 for terminal page| right bottom chart
+     */
+    createChart1ForTerminal: function() {
+      //Get chart1 box
+      var oChart1Box = this.byId('chart1Box');
+      oChart1Box.setBusy(true);
+      if (this._selectedStartYear === undefined) {
+        this._selectedStartYear = this._currentYear;
+      }
+      var ChinaPERCHARTService = huawei.cmes.util.services.Provider.OverviewService
+        .CHART1INFOterminal;
+
+      //@Rita updated
+      var startDate = this.getCorrectDateFormat(this._defaultFilterDatepickerStartValue);
+      var endDate = this.getCorrectDateFormat(this._defaultFilterDatepickerEndValue);
+      //var sFilter = '?sDate=' + startDate + '&eDate=' + endDate;
+
+      var sFilter = '?sDate=' + startDate + '&eDate=' + endDate + '&dateType=';
+      sFilter += this._selectedDateType; // 
+      console.log(sFilter);
+      //Create model
+      var oDataModel = new sap.ui.model.json.JSONModel(huawei.cmes.util.services
+        .Proxy.XsjsProxy(ChinaPERCHARTService, sFilter));
+
+      //Create chart
+      var oLine = new sap.viz.ui5.Line({
+        // title: new sap.viz.ui5.types.Title({visible: true, text:
+        // '单台智能手机加工成本降低率'}),
+        dataset: new sap.viz.core.FlattenedDataset({
+          dimensions: [{
+            axis: 1,
+            name: sap.oBundle.getText('Month'),
+            value: '{Month}'
+          }, {
+            axis: 2,
+            name: sap.oBundle.getText('TYPE'),
+            //value: '{TYPE}'
+            value: "{path:'TYPE', formatter:'huawei.cmes.util.commons.Formatters.KPIChartLengendFormatter'}",
+          }],
+
+          measures: [{
+            name: '降低率',
+            value: '{PER}'
+          }],
+
+          data: {
+            path: '/d/results'
+          }
+        })
+      });
+      //Set the height and width
+      oLine.setHeight("330px").setWidth("100%");
+
+      // attach the model to the chart and display it
+      // oLineChart.setDataset(oDataModel).getModel().loadData(sChart1Url);
+      oLine.setModel(oDataModel);
+      //Set the position of chart legend
+      var DualChart_legendPositionBotton = new sap.viz.ui5.types.Legend({
+        layout: {
+          position: sap.viz.ui5.types.legend.Common_position.bottom
+        }
+      });
+      oLine.setLegendGroup(DualChart_legendPositionBotton);
+      //Attach the function to select event
+      oLine.attachSelectData(CHART_HELPER.onSelectData);
+      //Attach the function to deselect event
+      oLine.attachDeselectData(CHART_HELPER.onDeSelectRerender);
+
+      // set the marker's visibility
+      var oDualLinePlotArea = oLine.getPlotArea();
+      huawei.cmes.util.chart.Helper.setChartAttributes(oDualLinePlotArea,
+        false);
+
+      // set colors
+      var sColor = new Array(2);
+      sColor[0] = 'rgb(116, 140, 178)'; //
+      sColor[1] = 'rgb(156, 198, 119)'; //
+      oDualLinePlotArea.setColorPalette(sColor);
+      //Set unit box
+      var unit = sap.oBundle.getText('UNIT') + ':';
+      var chinaLabelBox = new sap.m.HBox({
+        items: [new sap.m.Label({
+          text: unit + '%'
+        })],
+        alignItems: 'Start',
+        justifyContent: 'SpaceBetween'
+      }).addStyleClass('chart-unit-label');
+
+      oChart1Box.removeAllItems();
+      oChart1Box.addItem(chinaLabelBox);
+      oChart1Box.addItem(oLine);
+      // return oLine;
+      oChart1Box.setBusy(false);
+    },
+
+    /**
+     * Create chart1 for network page| right bottom chart
+     */
+    createChart1: function() {
+      // get the existing chart in xml view
+      var oChart1Box = this.byId('chart1Box');
+      oChart1Box.setBusy(true);
+      var oDualChart = this.getView().byId('chart1');
+      // create a Data Model without data
+      // we load chart data by in loadChartData()
+      if (this._selectedStartYear === undefined) {
+        this._selectedStartYear = this._currentYear;
+      }
+      //      oDualChart.setLegend(new sap.viz.ui5.types.legend.Common({
+      //        visible: true,
+      //        isScrollable: true
+      //      }));
+
+      var ChinaFHLBCHARTService = huawei.cmes.util.services.Provider.OverviewService
+        .CHART1INFO;
+
+      //@Rita updated
+      var startDate = this.getCorrectDateFormat(this._defaultFilterDatepickerStartValue);
+      var endDate = this.getCorrectDateFormat(this._defaultFilterDatepickerEndValue);
+      //Get filters
+      var sFilter = '?sDate=' + startDate + '&eDate=' + endDate + '&REGION=';
+      sFilter += '%27' + this._sRegionId + '%27&dateType=' + this._selectedDateType + ''; // that._sRegionId
+      //Create model
+      var oDataModel = new sap.ui.model.json.JSONModel(huawei.cmes.util.services
+        .Proxy.XsjsProxy(ChinaFHLBCHARTService, sFilter));
+
+      //When the data is fetched, execute the callback function
+      oDataModel.attachRequestCompleted(function(data) {
+        //Check the error
+        var error = data.getSource().getData().d.results[0].error;
+        if (error === 'NO_PERIOD_DETAILS') {
+          //Clear model data
+          oDataModel.setData('');
+          oChart1Box.getItems()[0].setVisible(false);
+          oDualChart.setNoData(new sap.m.Label({
+            text: sap.oBundle.getText('NO_PERIOD_DETAILS')
+          }).addStyleClass('no-data-label'));
+        } else {
+          oChart1Box.getItems()[0].setVisible(true);
+        }
+      });
+
+      // set Dataset template
+      var oDualComDataset = {
+        dimensions: [{
+          axis: 1,
+          name: sap.oBundle.getText('Month'),
+          value: '{Month}'
+        }, {
+          axis: 2,
+          name: sap.oBundle.getText('TYPE'),
+          //value: '{TYPE}'
+          value: "{path:'TYPE', formatter:'huawei.cmes.util.commons.Formatters.KPIChartLengendFormatter'}",
+        }],
+
+        measures: [{
+          group: 1,
+          //name: '料本',
+          name: this.oBundle.getText("materialcost"),
+          value: '{Shipment}'
+        }, {
+          group: 2,
+          //name: '费 / 料',
+          name: this.oBundle.getText("manufacturingCost"),
+          value: '{COST}'
+        }],
+
+        data: {
+          path: '/d/results'
+        }
+      };
+      // Flatten the Dataset template
+      var oDataset = new sap.viz.core.FlattenedDataset(oDualComDataset);
+
+      oDualChart.setDataset(oDataset);
+      // attach the model to the chart
+      oDualChart.setModel(oDataModel);
+
+      //Attach function to select event
+      oDualChart.attachSelectData(CHART_HELPER.onSelectData);
+      //Attach function to deselect event
+      oDualChart.attachDeselectData(CHART_HELPER.onDeSelectRerender);
+      // set the marker's visibility
+      var oDualChartLine = oDualChart.getPlotArea().getLine();
+      huawei.cmes.util.chart.Helper.setChartAttributes(oDualChartLine,
+        false);
+
+      // set colors
+      huawei.cmes.util.chart.Helper.setDualChartColor(oDualChart, 1, 0,
+        "rgb(116, 140, 178)"); // dark
+      // blue
+      huawei.cmes.util.chart.Helper.setDualChartColor(oDualChart, 1, 1,
+        "rgb(156, 198, 119)"); // dark
+      // green
+
+      huawei.cmes.util.chart.Helper.setDualChartColor(oDualChart, 2, 0,
+        "rgb(234, 207, 94)"); // light 
+      huawei.cmes.util.chart.Helper.setDualChartColor(oDualChart, 2, 1,
+        "rgb(249, 173, 121)"); // light
+      //Create the unit box
+      var unit = sap.oBundle.getText('UNIT') + ':';
+      var chinaLabelBox = new sap.m.HBox({
+        items: [new sap.m.Label({
+          text: unit + sap.oBundle.getText('UnitOfYiRMB')
+        }), new sap.m.Label({
+          text: unit + '%'
+        })],
+        alignItems: 'Start',
+        justifyContent: 'SpaceBetween'
+      }).addStyleClass('chart-unit-label');
+
+      oChart1Box.removeAllItems();
+      oChart1Box.addItem(chinaLabelBox);
+      oChart1Box.addItem(oDualChart);
+
+      oChart1Box.setBusy(false);
+    },
+
+    /**
+     * Press the back button on the left top
+     */
+    handleNavBack: function() {
+      //Put this in that
+      var that = this;
+      //Get the router
+      var oRouter = sap.ui.core.routing.Router.getRouter("appRouter");
+      //Call function after 0.5 second
+      jQuery.sap.delayedCall(500, this, function() {
+        //Jump to globalOverview
+        oRouter.navTo("globalOverview", {}, false);
+
+        setTimeout(function() {
+          //document.getElementById('GLOBAL--OverviewPopover').style.display = 'initial';
+          //Resize the window the correct the positin of elements
+          $(window).resize();
+          //Set the default value of _filterDateType to be 'MONTH'
+          that._filterDateType = 'MONTH';
+        }, 500);
+      });
+      //      window.history.go(-1);
+    },
+
+    /* response to time type radio button selection */
+    onTimeRadioButtonSelect: function(oEvent) {
+      //Get the _filterDateType
+      this._filterDateType = oEvent.getSource().getText();
+      //Get the _selectedDateType
+      this._selectedDateType = oEvent.getSource().getText();
+      //Set the corresponding values
+      if (this._filterDateType === '天') {
+        this._filterDateType = 'DAY';
+        this._selectedDateType = 'DAY';
+      } else if (this._filterDateType === '周') {
+        this._filterDateType = 'WEEK';
+        this._selectedDateType = 'WEEK';
+      } else if (this._filterDateType === '月') {
+        this._filterDateType = 'MONTH';
+        this._selectedDateType = 'MONTH';
+      } else if (this._filterDateType === '年') {
+        this._filterDateType = 'YEAR';
+        this._selectedDateType = 'YEAR';
+      } else if (this._filterDateType === 'Year') {
+        this._filterDateType = 'YEAR';
+        this._selectedDateType = 'YEAR';
+      } else if (this._filterDateType === 'Month') {
+        this._filterDateType = 'MONTH';
+        this._selectedDateType = 'MONTH';
+      } else if (this._filterDateType === 'Week') {
+        this._filterDateType = 'WEEK';
+        this._selectedDateType = 'WEEK';
+      } else if (this._filterDateType === 'Day') {
+        this._filterDateType = 'DAY';
+        this._selectedDateType = 'DAY';
+      }
+
+      this.checkDateIsRight('overviewCNfilterDateStart', 'overviewCNfilterDateEnd');
+    },
+
+    /**
+     * Check Date
+     * @param oEvent
+     */
+    checkDateIsRight: function(startPickerId, endPickerId) {
+      var startDatePicker = sap.ui.getCore().byId(startPickerId);
+      var endDatePicker = sap.ui.getCore().byId(endPickerId);
+
+      //Change the '-' to '/' 2015-05-12 to 2015/05/12
+      //IE only support /
+      var insertBackSlash = function(date) {
+        if (date.indexOf('-') === -1 && date.indexOf('/') === -1) {
+          return date.substring(0, 4) + '/' + date.substring(4, 6) + '/' + date.substring(6, 8);
+        } else {
+          return date.replace(/\-/g, '/');
+        }
+      };
+      var startDate = insertBackSlash(startDatePicker.getYyyymmdd());
+      var endDate = insertBackSlash(endDatePicker.getYyyymmdd());
+
+      var validationResult = HELPER.periodValidation(startDate,
+        endDate, this._filterDateType);
+      //If return empty string, it is wrong
+      if (validationResult !== "") {
+        var warning = sap.oBundle.getText(validationResult);
+        $('.input-warning-text').text(warning);
+        startDatePicker.setValueState(sap.ui.core.ValueState.Error);
+        endDatePicker.setValueState(sap.ui.core.ValueState.Error);
+      } else {
+        $('.input-warning-text').text('');
+        startDatePicker.setValueState(sap.ui.core.ValueState.None);
+        endDatePicker.setValueState(sap.ui.core.ValueState.None);
+      }
+    },
+
+    /**
+     * Check if the value of the datepicker selected is right
+     */
+    onBuildDateSelected: function(oEvent) {
+      //Start Date Picker
+      var startDatePicker = oEvent.getSource().getParent().getParent().getItems()[0].getItems()[1];
+      //End Date Picker
+      var endDatePicker = oEvent.getSource().getParent().getParent().getItems()[1].getItems()[1];
+      //Start Date Value
+      var startDateValue = startDatePicker.getYyyymmdd();
+      //End Date Value
+      var endDateValue = endDatePicker.getYyyymmdd();
+
+      //Period Names
+      var periodNames = ['DAY', 'WEEK', 'MONTH', 'YEAR'];
+      var periodBox = oEvent.getSource().getParent().getParent().getParent().getItems()[2];
+      //Get all radiobuttons
+      var periodRadios = periodBox.getItems();
+      // Get Period
+      var selectedPeriod = '';
+      periodRadios.forEach(function(radio, index) {
+        if (radio.getItems()[0].getSelected()) {
+          selectedPeriod = periodNames[index];
+        }
+      });
+      //Change from YYYYMMDD to YYY-MM-DD
+      var dateFormatter = function(oldDate) {
+        if (oldDate.indexOf('-') === -1) {
+          return oldDate.substr(0, 4) + '-' + oldDate.substr(4, 2) + '-' + oldDate.substr(6, 2);
+        } else {
+          return oldDate;
+        }
+      };
+      //Change the date format
+      startDateValue = dateFormatter(startDateValue);
+      endDateValue = dateFormatter(endDateValue);
+
+      //Get the validation infomation
+      var validationResult = HELPER.periodValidation(startDateValue,
+        endDateValue, selectedPeriod);
+
+      //Check if the input of date is right
+      if (validationResult !== "") {
+        var warning = sap.oBundle.getText(validationResult);
+        $('.input-warning-text').text(warning);
+        startDatePicker.setValueState(sap.ui.core.ValueState.Error);
+        endDatePicker.setValueState(sap.ui.core.ValueState.Error);
+      } else {
+        $('.input-warning-text').text('');
+        startDatePicker.setValueState(sap.ui.core.ValueState.None);
+        endDatePicker.setValueState(sap.ui.core.ValueState.None);
+      }
+    },
+
+    /* handle click event of cancel button on chart build filter */
+    onCancelchartbuildfilter: function(oEvent) {
+      sap.ui.getCore().byId('overview-chart-build-filter').close();
+
+    },
+    /* pack filter data , send back for chart display; data filter ,press ok button*/
+    onConfirmchartbuildfilter: function(oEvent) {
+
+      this._defaultFilterDatepickerStartValue = sap.ui.getCore().byId(
+        'overviewCNfilterDateStart').getYyyymmdd();
+      this._defaultFilterDatepickerEndValue = sap.ui.getCore().byId(
+        'overviewCNfilterDateEnd').getYyyymmdd();
+
+      /**
+       * Get Period
+       */
+      var periodNames = ['DAY', 'WEEK', 'MONTH', 'YEAR'];
+      var periodBox = sap.ui.getCore().byId('choose-time-box');
+      var periodRadios = periodBox.getItems();
+      // Get Period
+      var selectedPeriod = '';
+      periodRadios.forEach(function(radio, index) {
+        if (radio.getItems()[0].getSelected()) {
+          selectedPeriod = periodNames[index];
+        }
+      });
+      this._filterDateType = selectedPeriod;
+
+      this.showDate();
+      this.refreshCardInfoAfterFilter(); //00315717
+
+      var oModel = new sap.ui.model.json.JSONModel();
+      if (this._selectedOrg === '泛网络') {
+        this._sCategory = 'network';
+        oModel.setData(this._networkgensDataset);
+        this.getView().setModel(oModel);
+        var china_overview_network = this.oBundle.getText(
+          'china_overview_network');
+        this.getView().byId('overviewPageName').setText(
+          china_overview_network);
+      } else if (this._selectedOrg === '终端') {
+        var china_overview_terminal = this.oBundle.getText(
+          'china_overview_terminal');
+        this.getView().byId('overviewPageName').setText(
+          china_overview_terminal);
+        this._sCategory = 'terminal';
+        oModel.setData(this._terminalgensDataset);
+        this.getView().setModel(oModel);
+      }
+      if (this.checkGetDateRange() === false) {
+        return;
+      }
+      //Get factory list
+      var factorylist = sap.ui.getCore().byId('Factory-List');
+      /* handle current selection */
+      /* check factory selection changed or not */
+      var newSelection = factorylist.getSelectedItems();
+      if (newSelection.length > 0) {
+        this._selectedItems = newSelection;
+      } else {
+        sap.m.MessageToast.show(sap.oBundle.getText('NoFactorySelected'));
+        return;
+      }
+      /* pack data */
+      if (this.packFilterForChart2_5() === false) {
+        return;
+      }
+      //TODO
+      this.refreshChart1AfterFilter();
+      this.refreshChart2_5AfterFilter();
+      this.loadChartData();
+
+      //      console.log(this._selectedDateType);
+
+      /** Set the global variable when the seleted items are changed  */
+
+      var selectedOrgIndex = this.getListSelectedIndex('Organization-List');
+      sap.chinaInfo.chinaOrg = selectedOrgIndex;
+
+      var selectedFactoryIndex = this.getListSelectedIndex('Factory-List');
+      sap.chinaInfo.chinaFactory = selectedFactoryIndex;
+      //console.log(selectedOrgIndex, selectedFactoryIndex);
+      sap.ui.getCore().byId('overview-chart-build-filter').close();
+
+    },
+
+    /* refresh card info after filter confirm , para: year,category(org) 00315717*/
+    refreshCardInfoAfterFilter: function() {
+      this.initgensDataSet();
+    },
+
+    /* refresh chart1-2 after filter confirm , para: year,category(org) */
+    refreshChart1AfterFilter: function() {
+      if (this._sCategory === 'network') {
+        this.createChart1();
+      } else if (this._sCategory === 'terminal') {
+        this.createChart1ForTerminal();
+      }
+    },
+
+
+    /* refresh chart3---5 after filter confirm */
+    refreshChart2_5AfterFilter: function() {
+      var that = this;
+      //Get all charts
+      var chart2 = this.getView().byId('chart2');
+      var chart3 = this.getView().byId('chart3');
+      var chart4 = this.getView().byId('chart4');
+      var chart5 = this.getView().byId('chart5');
+
+      //Attach functions to select event
+      chart2.attachSelectData(CHART_HELPER.onSelectData);
+      chart3.attachSelectData(CHART_HELPER.onSelectData);
+      chart4.attachSelectData(CHART_HELPER.onSelectData);
+      chart5.attachSelectData(CHART_HELPER.onSelectData);
+
+      //Set all charts busy
+      chart3.setBusy(true);
+      chart4.setBusy(true);
+      chart5.setBusy(true);
+
+      /**
+       * set models for charts
+       * @param  {Object} data      - data from service
+       * @param  {sap.ui.model.json.JSONModel} model - Model need to be changed
+       * @param  {String} modelName - Name of the model
+       * @param  {sap.ui.viz.chart} chart - Chart of whose model needs to be changed
+       */
+      var dataHandler = function(data, model, modelName, chart) {
+        switch (modelName) {
+          case 'modelChart2':
+            chart.setBusy(false);
+            break;
+          case 'modelChart3':
+            chart.setBusy(false);
+            break;
+          case 'modelChart4':
+            chart.setBusy(false);
+            break;
+          case 'modelChart5':
+            chart.setBusy(false);
+            break;
+        }
+        // console.log (data);
+        model.setData(data);
+        setTimeout(function() {
+          CHART_HELPER.removeTopLabelOnY('marker-remove-top-label-on-y');
+        }, 100);
+      };
+      /* declare */
+      var service = huawei.cmes.util.services.Provider.OverviewService.GETKPISSERVICE;
+      var sUrl = huawei.cmes.util.services.Proxy.XsjsProxy(service);
+
+      //Create all models for all charts
+      var modelChart2 = new sap.ui.model.json.JSONModel();
+      var modelChart3 = new sap.ui.model.json.JSONModel();
+      var modelChart4 = new sap.ui.model.json.JSONModel();
+      var modelChart5 = new sap.ui.model.json.JSONModel();
+
+      /* fresh page charts */
+      /* chart2 */
+      chart2.setDataset(new sap.viz.ui5.data.FlattenedDataset({
+        dimensions: [{
+          axis: 1,
+          name: sap.oBundle.getText(this._selectedDateType),
+          value: '{DATE}'
+            //          value: {
+            //            path: 'DATE',
+            //            formatter: function (value) {
+            //              value = huawei.cmes.util.commons.Formatters.chartPeriodFormatter(
+            //                value, that._selectedDateType);
+            //              return value;
+            //            }
+            //          }
+        }],
+        measures: [{
+            //name: '实际',  ActualValue
+            name: this.oBundle.getText("ActualValue"),
+            value: '{P_VALUE}'
+          },
+
+          {
+            //name: '目标',
+            name: this.oBundle.getText("TargetValue"),
+            value: '{T_VALUE}'
+          }
+
+        ],
+
+        data: {
+          path: '/'
+        }
+      }));
+
+      chart2.setModel(modelChart2);
+
+      if (this._filterDateType !== "WEEK" && this._filterDateType !== "DAY") {
+        chart2.setBusy(true);
+        //Ajax call
+        HTTP.ajaxInitModel(sUrl, this._filterChart2, modelChart2, dataHandler,
+          'modelChart2', chart2);
+      } else {
+        chart2.setNoData(new sap.m.Label({
+          text: sap.oBundle.getText('NO_PERIOD_DETAILS')
+        }).addStyleClass('no-data-label'));
+      }
+
+      // set the marker's visibility
+      var oLinePlotArea = chart2.getPlotArea();
+      huawei.cmes.util.chart.Helper.setChartAttributes(oLinePlotArea, false);
+
+      // set colors
+      var sColor = new Array(2);
+      sColor[0] = 'rgb(116, 140, 178)'; //
+      sColor[1] = 'rgb(156, 198, 119)'; //
+      oLinePlotArea.setColorPalette(sColor);
+
+      /* Chart3 */
+      chart3.setDataset(new sap.viz.ui5.data.FlattenedDataset({
+        dimensions: [{
+          axis: 1,
+          // name : 'Month',
+          // value : '{Month}'
+          name: sap.oBundle.getText(this._selectedDateType),
+          value: '{DATE}'
+            //          value: {
+            //            path: 'DATE',
+            //            formatter: function (value) {
+            //              value = huawei.cmes.util.commons.Formatters.chartPeriodFormatter(
+            //                value, that._selectedDateType);
+            //              return value;
+            //            }
+            //          }
+        }],
+
+        measures: [{
+          //name: '实际',
+          name: this.oBundle.getText("ActualValue"),
+          value: '{P_VALUE}'
+        }, {
+          //name: '目标',
+          name: this.oBundle.getText("TargetValue"),
+          value: '{T_VALUE}'
+        }],
+
+        data: {
+          path: '/'
+        }
+      }));
+      chart3.setModel(modelChart3);
+
+
+      HTTP.ajaxInitModel(sUrl, this._filterChart3, modelChart3, dataHandler,
+        'modelChart3', chart3);
+
+      // set the marker's visibility
+      var chart3PlotArea = chart3.getPlotArea();
+      huawei.cmes.util.chart.Helper.setChartAttributes(chart3PlotArea,
+        false);
+
+      // set colors
+      sColor = new Array(2);
+      sColor[0] = 'rgb(116, 140, 178)';
+      sColor[1] = 'rgb(156, 198, 119)';
+      chart3PlotArea.setColorPalette(sColor);
+
+      /* Chart4 */
+      // ================================================================
+      HTTP.ajaxInitModel(sUrl, this._filterChart4, modelChart4, dataHandler,
+        'modelChart4', chart4);
+      chart4.setModel(modelChart4);
+      chart4.setDataset(new sap.viz.ui5.data.FlattenedDataset({
+        dimensions: [{
+          axis: 1,
+          name: sap.oBundle.getText(this._selectedDateType),
+          value: '{DATE}'
+            //          value: {
+            //            path: 'DATE',
+            //            formatter: function (value) {
+            //              value = huawei.cmes.util.commons.Formatters.chartPeriodFormatter(
+            //                value, that._selectedDateType);
+            //              return value;
+            //            }
+            //          }
+        }],
+
+        measures: [{
+          //name: '实际',
+          name: this.oBundle.getText("ActualValue"),
+          value: '{P_VALUE}'
+        }, {
+          //name: '目标',
+          name: this.oBundle.getText("TargetValue"),
+          value: '{T_VALUE}'
+        }],
+
+        data: {
+          path: '/'
+        }
+      }));
+      // set the marker's visibility
+      var chart4PlotArea = chart4.getPlotArea();
+      huawei.cmes.util.chart.Helper.setChartAttributes(chart4PlotArea,
+        false);
+      CHART_HELPER.setYAxisScale(chart4, 80, 105);
+
+      // set colors
+      sColor = new Array(2);
+      sColor[0] = 'rgb(116, 140, 178)'; //
+      sColor[1] = 'rgb(156, 198, 119)'; //
+      chart4PlotArea.setColorPalette(sColor);
+      // ==================================================================
+
+      /* Chart5 */
+
+      // ========================================================================
+      chart5.setDataset(new sap.viz.ui5.data.FlattenedDataset({
+        dimensions: [{
+          axis: 1,
+          // name : 'Quarter',
+          // value : '{Quarter}'
+          name: sap.oBundle.getText(this._selectedDateType),
+          value: '{DATE}'
+            //          value: {
+            //            path: 'DATE',
+            //            formatter: function (value) {
+            //              value = huawei.cmes.util.commons.Formatters.chartPeriodFormatter(
+            //                value, that._selectedDateType);
+            //              return value;
+            //            }
+            //          }
+        }],
+
+        measures: [{
+          //name: '实际',
+          name: this.oBundle.getText("ActualValue"),
+          value: '{P_VALUE}'
+        }, {
+          //name: '目标',
+          name: this.oBundle.getText("TargetValue"),
+          value: '{T_VALUE}'
+        }],
+
+        data: {
+          path: '/'
+        }
+      }));
+
+      HTTP.ajaxInitModel(sUrl, this._filterChart5, modelChart5, dataHandler,
+        'modelChart5', chart5);
+      chart5.setModel(modelChart5);
+      CHART_HELPER.setYAxisScale(chart5, 0, 110);
+
+
+      // console.log('modelChart5', modelChart5);
+      // set the marker's visibility
+      var chart5PlotArea = chart5.getPlotArea();
+      huawei.cmes.util.chart.Helper.setChartAttributes(chart5PlotArea,
+        false);
+
+      // set colors
+      sColor = new Array(2);
+      sColor[0] = 'rgb(116, 140, 178)'; //
+      sColor[1] = 'rgb(156, 198, 119)'; //
+      chart5PlotArea.setColorPalette(sColor);
+      // ==========================================================================
+
+    },
+
+    /* reset chart datamodel with filter */ // /no use anymore
+    dataLoadingwithFilter: function(sUrl, postData, model, chart) {
+      $.ajax({
+        url: sUrl,
+        type: 'GET',
+        beforeSend: function(xhr) {
+          xhr.setRequestHeader('X-CSRF-Token', 'Fetch');
+        }
+      }).done(function(data, textStatus, XMLHttpRequest) {
+        var token = XMLHttpRequest.getResponseHeader('X-CSRF-Token');
+        $.ajax({
+          url: sUrl,
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          type: 'POST',
+          data: JSON.stringify(postData),
+          beforeSend: function(xhr) {
+            xhr.setRequestHeader('X-CSRF-Token', token);
+          }
+        }).done(function(data, textStatus, XMLHttpRequest) {
+          // console.log(data);
+          model.setData(data);
+          chart.setModel(model);
+        }).fail(function(erroutside) {
+          sap.ui.commons.MessageBox.alert(
+            'Network Error,please check with Administrator!');
+        });
+
+      }).fail(function(erroutside) {
+        sap.ui.commons.MessageBox.alert(
+          'Network Error,please check with Administrator!');
+      });
+    },
+
+    /**
+     * convert date format - 20150402 to 2015-04-02
+     * @param  {String} oDate
+     * @return {String}
+     */
+    getCorrectDateFormat: function(oDate) {
+      var date = oDate.split('-');
+      var result = oDate;
+      if (date.length <= 1) {
+        var year = oDate.slice(0, 4);
+        var month = oDate.slice(4, 6);
+        var day = oDate.slice(6, 8);
+        result = year + "-" + month + "-" + day;
+      }
+      return result;
+    },
+
+    /* check and get Date range */
+    checkGetDateRange: function() {
+      /* check selection */
+      var start = sap.ui.getCore().byId('overviewCNfilterDateStart').getYyyymmdd();
+      var end = sap.ui.getCore().byId('overviewCNfilterDateEnd').getYyyymmdd();
+
+      // console.log("start date:", start);
+      if (start === null || end === null) {
+        sap.ui.commons.MessageBox.alert('Please set \'Date Range\' first!');
+        return false;
+      }
+      if (this._filterDateType === undefined) {
+        sap.ui.commons.MessageBox.alert('Please set \'Date Type\' first!');
+        return false;
+      }
+
+
+      /* get data */
+      //@Rita updated:
+
+      var startYear = start.slice(0, 4);
+      var endYear = end.slice(0, 4);
+      this._selectedStartYear = startYear;
+      this._selectedEndYear = endYear;
+      this._selectedStartDate = this.getCorrectDateFormat(start);
+      this._selectedEndDate = this.getCorrectDateFormat(end);
+
+
+      var msg = HELPER.periodValidation(this._selectedStartDate, this._selectedEndDate,
+        this._filterDateType);
+      if (msg !== "") {
+        sap.ui.commons.MessageBox.alert(this.oBundle.getText(msg));
+        return false;
+      }
+      return true;
+
+    },
+
+    /* pack filter for Chart3 */
+    packFilterForChart2_5: function() {
+      switch (this._selectedDateType) {
+        case '年':
+          this._selectedDateType = 'YEAR';
+          break;
+        case '月':
+          this._selectedDateType = 'MONTH';
+          break;
+        case '日':
+          this._selectedDateType = 'DAY';
+          break;
+        case '周':
+          this._selectedDateType = 'WEEK';
+          break;
+      }
+
+      /* init this._filterChart2 */
+      this._filterChart2 = {
+        DATE: {},
+        DIMENSIONS: {
+          AREA: [],
+          BG: []
+        },
+        KPI: {},
+      };
+      /* init this._filterChart3 */
+      this._filterChart3 = {
+        DATE: {},
+        DIMENSIONS: {
+          AREA: [],
+          BG: [],
+          PRODUCT_FORM: []
+        },
+        KPI: {},
+      };
+      /* init this._filterChart4 */
+      this._filterChart4 = {
+        DATE: {},
+        DIMENSIONS: {
+          AREA: [],
+          BG: [],
+          FACTORY: []
+        },
+        KPI: {},
+      };
+
+      /* init this._filterChart5 */
+      this._filterChart5 = {
+        DATE: {},
+        DIMENSIONS: {
+          AREA: [],
+          BG: [],
+          FACTORY: []
+        },
+        KPI: {},
+      };
+
+      /* Set DATE */
+      this._filterChart2.DATE.START_DATE = this._selectedStartDate;
+      this._filterChart2.DATE.END_DATE = this._selectedEndDate;
+      this._filterChart2.DATE.TYPE = this._selectedDateType;
+
+      this._filterChart3.DATE.START_DATE = this._selectedStartDate;
+      this._filterChart3.DATE.END_DATE = this._selectedEndDate;
+      this._filterChart3.DATE.TYPE = this._selectedDateType;
+
+      this._filterChart4.DATE.START_DATE = this._selectedStartDate;
+      this._filterChart4.DATE.END_DATE = this._selectedEndDate;
+      this._filterChart4.DATE.TYPE = this._selectedDateType;
+
+      this._filterChart5.DATE.START_DATE = this._selectedStartDate;
+      this._filterChart5.DATE.END_DATE = this._selectedEndDate;
+      this._filterChart5.DATE.TYPE = this._selectedDateType;
+
+      var factories = [];
+      var bg = [];
+      var area = [];
+      var pform = [];
+
+      area.push({
+        ID: '深圳供应中心',
+        NAME: '深圳供应中心'
+      });
+
+      bg.push({
+        ID: this._selectedOrg,
+        NAME: this._selectedOrg
+      });
+
+      if (this._selectedOrg === '泛网络') {
+        this._filterChart2.KPI = {
+          'KPI_AGG': 'CCR',
+          'PAGE_ID': 'B1'
+        };
+        pform.push({
+          ID: '整机',
+          NAME: '整机'
+        });
+      } else if (this._selectedOrg === '终端') {
+        this._filterChart2.KPI = {
+          'KPI_AGG': 'CCN',
+          'PAGE_ID': 'B1'
+        };
+        pform.push({
+          ID: '整机',
+          NAME: '整机'
+        });
+      }
+
+      this._filterChart2.DIMENSIONS.AREA = area;
+      this._filterChart2.DIMENSIONS.BG = bg;
+
+      var kpiAgg = 'TCC';
+      if (bg[0].NAME === '泛网络') {
+        kpiAgg = 'FCC';
+      }
+
+      this._filterChart3.DIMENSIONS.AREA = area;
+      this._filterChart3.DIMENSIONS.BG = bg;
+      this._filterChart3.DIMENSIONS.PRODUCT_FORM = pform;
+      this._filterChart3.KPI = {
+        'KPI_AGG': kpiAgg,
+        'PAGE_ID': 'B1'
+      };
+
+      this._filterChart4.DIMENSIONS.AREA = area;
+      this._filterChart4.DIMENSIONS.BG = bg;
+      this._filterChart4.KPI = {
+        'KPI_AGG': 'LAR',
+        'PAGE_ID': 'B1'
+      };
+
+      this._filterChart5.DIMENSIONS.AREA = area;
+      this._filterChart5.DIMENSIONS.BG = bg;
+      this._filterChart5.KPI = {
+        'KPI_AGG': 'TPY',
+        'PAGE_ID': 'B1'
+      };
+      /* Factories */
+      var factoryListControl = sap.ui.getCore().byId('Factory-List');
+      var factoryList = this._selectedItems;
+      console.log(factoryList[0].getTitle());
+      var factoryListItems = factoryListControl.getItems();
+      for (var k = 1; k < factoryListItems.length; k++) {
+        factories.push({
+          ID: factoryListItems[k].getTitle(),
+          NAME: factoryListItems[k].getTitle(),
+        });
+      }
+      for (var i = 0; i < factoryList.length; i++) {
+        if (factoryList[i].getTitle() === 'All') {
+          this._filterChart3.DIMENSIONS.FACTORY = factories;
+          this._filterChart4.DIMENSIONS.FACTORY = factories;
+          this._filterChart5.DIMENSIONS.FACTORY = factories;
+        } else {
+          var factorySingle = [];
+          factorySingle.push({
+            ID: factoryList[i].getTitle(),
+            NAME: factoryList[i].getTitle(),
+          });
+          this._filterChart3.DIMENSIONS.FACTORY = factorySingle;
+          this._filterChart3.FILTER = {};
+          this._filterChart3.FILTER.FACTORY = factorySingle;
+
+          this._filterChart5.DIMENSIONS.FACTORY = factorySingle;
+          this._filterChart5.FILTER = {};
+          this._filterChart5.FILTER.FACTORY = factorySingle;
+
+          this._filterChart4.DIMENSIONS.FACTORY = factorySingle;
+          this._filterChart4.FILTER = {};
+          this._filterChart4.FILTER.FACTORY = factorySingle;
+        } //TODO
+      }
+      //this._filterChart4.DIMENSIONS.FACTORY = factories;
+
+      if (factories.length === 0) {
+        sap.m.MessageToast.show('No factory selected!');
+        return false;
+      }
+      return true;
+
+    },
+
+    /* show filter popover when click on city */
+    showfilterPopover: function(oEvent) {
+      var city = oEvent;
+      // create popover
+      if (!this._ofilterPopover) {
+        this._ofilterPopover = sap.ui.xmlfragment(
+          'huawei.cmes.fragment.overview.overviewFilterPopover', this);
+        this.getView().addDependent(this._ofilterPopover);
+      }
+      this._ofilterPopover.openBy(city);
+    },
+    /* show build chart filter dialog when click filter popover */
+    /**
+     * @param oEvent
+     */
+    handlefilterPopupPress: function(oEvent) {
+      // this._obusyDialog.open();
+      /* load build-Chart-Filter dialog */
+      if (!this._overViewCNfilterDialog) {
+        this._overViewCNfilterDialog = sap.ui.xmlfragment(
+          'huawei.cmes.fragment.overview.buildChartFilter', this);
+        this.getView().addDependent(this._overViewCNfilterDialog);
+        sap.ui.getCore().byId('overviewCNfilterDateStart').setYyyymmdd(this._defaultFilterDatepickerStartValue);
+        sap.ui.getCore().byId('overviewCNfilterDateEnd').setYyyymmdd(this._defaultFilterDatepickerEndValue);
+      }
+
+      var filter = sap.ui.getCore().byId('overview-chart-build-filter');
+      var orgList = sap.ui.getCore().byId('Organization-List');
+      var factoryList = sap.ui.getCore().byId('Factory-List');
+
+      orgList.setModel(this._orgModel);
+
+      /** Set the global variables to store the selection */
+      if (sap.chinaInfo === undefined) {
+        sap.chinaInfo = {
+          chinaOrg: 0,
+          chinaFactory: 0
+        };
+      }
+
+      var chinaInfo = sap.chinaInfo;
+
+      /** Set the initial selection of the list */
+      if (orgList.getItems().length !== 0) {
+        orgList.getItems()[chinaInfo.chinaOrg].setSelected(true);
+      }
+      if (factoryList.getItems().length !== 0) {
+        factoryList.getItems()[chinaInfo.chinaFactory].setSelected(true);
+      }
+      this.onOrganizationSelectChange();
+
+      filter.open();
+      // this._obusyDialog.close();
+    },
+    /* get org dataset */
+    getOrgDataSet: function(orgFactoryData) {
+      this.factoryListNetwork = [];
+      var data = orgFactoryData;
+      var orgData = [];
+      var previous = '';
+
+      var inArray = function(value, array) {
+        var exist = false;
+        array.forEach(function(item) {
+          if (item.TYPE === value) {
+            exist = true;
+          }
+        });
+        return exist;
+      };
+
+      for (var i = 0; i < data.length; i++) {
+        if (data[i].TYPE === previous) {
+          if (previous === '0') {
+            this.factoryListNetwork.push({
+              ID: data[i].OEM,
+              NAME: data[i].OEM
+            });
+          } else {
+            continue;
+          }
+        } else {
+          if (previous === '') {
+            this.factoryListNetwork.push({
+              ID: data[i].OEM,
+              NAME: data[i].OEM
+            });
+          }
+          previous = data[i].TYPE;
+          switch (previous) {
+            case '0':
+              if (!inArray('泛网络', orgData)) {
+                orgData.push({
+                  TYPE: '泛网络'
+                });
+              }
+              break;
+            case '1':
+              if (!inArray('终端', orgData)) {
+                orgData.push({
+                  TYPE: '终端'
+                });
+              }
+              break;
+
+          }
+
+        }
+      }
+
+      return orgData;
+    },
+
+    /** Get index of the selected Item of a list with the id */
+    getListSelectedIndex: function(id) {
+      var selectedIndex = 0;
+      var list = sap.ui.getCore().byId(id);
+      list.getItems().forEach(function(item, index) {
+        if (item.getSelected()) {
+          selectedIndex = index;
+        }
+      });
+      return selectedIndex;
+    },
+
+    /* handle org item select event */
+    onOrganizationSelectChange: function(oEvent) {
+      var org;
+      if (oEvent === undefined) {
+        org = sap.ui.getCore().byId('Organization-List').getSelectedItem().mProperties.title;
+      } else {
+        org = oEvent.mParameters.listItem.mProperties.title;
+      }
+      var factorylist = sap.ui.getCore().byId('Factory-List');
+
+      this._selectedOrg = org;
+      var aFilters = [];
+      var sFilter = new sap.ui.model.Filter('TYPE', sap.ui.model.FilterOperator
+        .EQ, '0');
+      if (org === '泛网络') {
+        sFilter = new sap.ui.model.Filter('TYPE', sap.ui.model.FilterOperator
+          .EQ, '0');
+        aFilters.push(sFilter);
+
+      } else if (org === '终端') {
+        sFilter = new sap.ui.model.Filter('TYPE', sap.ui.model.FilterOperator
+          .EQ, '1');
+        aFilters.push(sFilter);
+
+      }
+      factorylist.setModel(this._factoryModel);
+      var binding = factorylist.getBinding('items');
+      binding.filter(aFilters);
+      factorylist.insertItem(new sap.m.StandardListItem({
+        title: 'All',
+        tooltip: 'select all factories'
+      }), 0);
+
+    },
+
+    /**
+     * Nav to world map page
+     */
+    navToHomePage: function() {
+      // this.bus.publish("nav", "backMaster");  
+      window.location.href = 'index.html';
+    },
+    
+    /* load json dataset */
+    getjsonDataset: function(service) {
+
+      var url = huawei.cmes.util.services.Proxy.XsjsProxy(service);
+      var dataset = '';
+      jQuery.ajax({
+        url: url,
+        dataType: 'json',
+        async: false,
+        success: function(data) {
+          dataset = data;
+        },
+        error: function(jqXHR, textStatus, errorThrown) {
+          console.log('error');
+        }
+      });
+      return dataset;
+    },
+
+    /**
+     * Access Check | not in use any more
+     */
+    accessCheck: function(type, pageName) {
+      if (sap.ui.getCore().byId("InformationDlg") !== undefined) {
+        sap.ui.getCore().byId("InformationDlg").destroy();
+      }
+      this.informationMsg = sap.ui.xmlfragment("huawei.cmes.fragment.commons.InformationMsg", this);
+      this.getView().addDependent(this.informationMsg);
+      var inforCollection = huawei.cmes.util.settings.Authorization.getLoginInfor(type, pageName);
+      if (inforCollection === false) {
+        var msg = "LOGIN_FAILED";
+        sap.ui.getCore().byId("information-msg").setText(this.oBundle.getText(msg));
+        this.informationMsg.open();
+        //            sap.ui.getCorobyId("information-dlg-icon").attachPress(function(){
+        //              this.informationMsgDlg.close();
+        //            });
+        throw new Error("Login failed: " + this.oBundle.getText(msg));
+      }
+    }
+  });
+})();
