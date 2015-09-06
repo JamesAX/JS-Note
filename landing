@@ -1,0 +1,1675 @@
+/*global huawei:false*/
+/*global jQuery:false*/
+/*global sap:false*/
+/*global localStorage:false*/
+/*global $:false*/
+/*global setTimeout:false*/
+/*global document:false*/
+/*global window:false*/
+/*global alert:false*/
+/*global location:false*/
+(function() {
+  "use strict";
+  //Formatter
+  jQuery.sap.require("huawei.cmes.util.commons.Formatters");
+  //Factory to create elements
+  jQuery.sap.require("huawei.cmes.util.commons.Factory");
+  //Get message box
+  jQuery.sap.require("sap.m.MessageBox");
+  //Factory to create elements
+  jQuery.sap.require("sap.ca.ui.dialog.factory");
+  //Authorization functions
+  jQuery.sap.require("huawei.cmes.util.settings.Authorization");
+  //Services
+  jQuery.sap.require("huawei.cmes.util.services.Provider");
+  //Proxy functions
+  jQuery.sap.require("huawei.cmes.util.services.Proxy");
+  //HTTP functions
+  jQuery.sap.require("huawei.cmes.util.services.Http");
+
+  /**
+   * Global varables
+   */
+  var PROXY = huawei.cmes.util.services.Proxy;
+  var PROVIDER = huawei.cmes.util.services.Provider;
+  var HTTP = huawei.cmes.util.http;
+  var FORMATTER = huawei.cmes.util.commons.Formatters;
+  var HELPER = huawei.cmes.util.commons.Helper;
+  /*
+   * var tempData = [ { TYPE : '0',// Terminal :0, Terminal :1 KPI_NAME : 'TPY',
+   * A_VALUE : '0.974', T_VALUE : '0.97', B_VALUE : '0.97', C_VALUE : '0.97' }, {
+   * TYPE : '0', KPI_NAME : 'MMIN', A_VALUE : '86', T_VALUE : '240', B_VALUE :
+   * '360', C_VALUE : '120' } ];
+   */
+
+  sap.ui.controller("huawei.cmes.view.LandingPage", {
+
+    /***************************************************************************
+     * defined public global variables
+     **************************************************************************/
+    _addKPI: {},
+    _userId: {},
+    _kpiType: '0',
+    _oModel: {},
+    _favoritesModel: {},
+    _favoritesLocal: [],
+    _selectedItems: [],
+    _batAddItems: [
+      [],
+      []
+    ],
+    _accessedKPIlist: {},
+
+    /***************************************************************************
+     * Page initiate for loading and binding model
+     **************************************************************************/
+    onInit: function() {
+      if (sap.ui.getCore().byId("InformationDlg") !== undefined) {
+        sap.ui.getCore().byId("InformationDlg").destroy();
+      }
+      this.informationMsg = sap.ui.xmlfragment(
+        "huawei.cmes.fragment.commons.InformationMsg", this);
+      this.getView().addDependent(this.informationMsg);
+
+      //Language settings
+      this.languageSetting();
+      //Initialize urls
+      this.initUrls();
+      //Initialize models
+      this.initModels();
+      //Load the page
+      this.pageLoading();
+      //INject data into models
+      this.setModelData();
+    },
+
+    /**
+     * Start the page loading
+     */
+    pageLoading: function() {
+      //Get authorization infomation
+      var inforCollection = huawei.cmes.util.settings.Authorization.getUserInfo();
+      //Get urer id
+      this._userId = inforCollection.id;
+      /** @type {sap.ui.xmlfragment} fragment tiles*/
+      var customTile = sap.ui.xmlfragment(
+        "huawei.cmes.fragment.home.overviewCustomTile", this);
+      /** @type {sap.ui.xmlfragment} fragment navigator panels - 3 panels in the middle*/
+      this.navigatorPanel = sap.ui.xmlfragment(
+        "huawei.cmes.fragment.home.navigatorPanel", this);
+
+      /**
+       * Add the fragments
+       */
+      this.byId("LaunchPadBox").addItem(customTile);
+      this.byId("LaunchPadBox").addItem(this.navigatorPanel);
+
+      /**
+       * Add Style class for the largest box of the content
+       * Since the size requiement of chinese and english versions are different
+       */
+      var dashboardWholeBoxStyleClass = 'dashboard-whole-box-cn';
+      if (sLocale === 'en-US') {
+        dashboardWholeBoxStyleClass = 'dashboard-whole-box-en';
+      } else {
+        dashboardWholeBoxStyleClass = 'dashboard-whole-box-cn';
+      }
+      this.byId('dashboard-whole-box').addStyleClass(dashboardWholeBoxStyleClass);
+      this.byId('dashboard-whole-box').addStyleClass(dashboardWholeBoxStyleClass);
+
+      /**
+       * Other fragments
+       */
+      sap.ui.xmlfragment("huawei.cmes.fragment.home.addKPIL1Component",
+        this);
+      sap.ui.xmlfragment("huawei.cmes.fragment.home.addKPIL2Detail", this);
+      sap.ui.xmlfragment("huawei.cmes.fragment.home.addKPIL3ToCategory",
+        this);
+      sap.ui.xmlfragment("huawei.cmes.fragment.home.delKPI", this);
+      sap.ui.xmlfragment("huawei.cmes.fragment.home.delCategory", this);
+
+      if (!this._oDialog) {
+        this._oDialog = sap.ui.xmlfragment(
+          "huawei.cmes.fragment.home.addKPIL0DialogDefine", this);
+        this.getView().addDependent(this._oDialog);
+      }
+      if (!this._oCategoryDialog) {
+        this._oCategoryDialog = sap.ui.xmlfragment(
+          "huawei.cmes.fragment.home.addCategory", this);
+        this.getView().addDependent(this._oCategoryDialog);
+      }
+
+      customTile.setModel(this.dashboardTileModel);
+
+      var oTileContentModel = new sap.ui.model.json.JSONModel(
+        "model/homePage/pageTilesCollection.json");
+
+      var sFilter = "";
+
+      this.byId("FavoriteVBox").setModel(oTileContentModel);
+
+      this._addKPI = {};
+      var xsjsUrl = huawei.cmes.util.services.Provider.HomeServie.getUserFavoriteKPI;
+      sFilter = "?&userId='" + this._userId + "'";
+
+      this._favoritesModel = new sap.ui.model.json.JSONModel(huawei.cmes.util
+        .services.Proxy.XsjsProxy(xsjsUrl, sFilter));
+      this.byId("FavoriteVBox").setModel(this._favoritesModel);
+
+      xsjsUrl = huawei.cmes.util.services.Provider.HomeServie.getKPIListForDEL;
+
+      this._favoritesKPIForDelModel = new sap.ui.model.json.JSONModel(
+        huawei.cmes.util.services.Proxy.XsjsProxy(xsjsUrl, sFilter));
+
+      sap.ui.getCore().byId("delKPIList").setModel(this._favoritesKPIForDelModel);
+      sap.ui.getCore().byId("delCtgList").setModel(this._favoritesModel);
+
+      xsjsUrl = huawei.cmes.util.services.Provider.HomeServie.getKeyKPIForINS;
+      this._oModel = new sap.ui.model.json.JSONModel(huawei.cmes.util.services
+        .Proxy.XsjsProxy(xsjsUrl));
+
+      sap.ui.getCore().byId("kpiComponentList").setModel(this._oModel);
+      sap.ui.getCore().byId("kpiDetailsList").setModel(this._oModel);
+      sap.ui.getCore().byId("categoryList").setModel(this._favoritesModel);
+      setInterval(function() {
+        HELPER.checkSessionExpiration();
+      }, 1000);
+    },
+
+    /**
+     * Intialize the urls
+     */
+    initUrls: function() {
+
+      // Dimension Url for Dropdownboxes
+      this.tileInfoUrl = PROXY.XsjsProxy(PROVIDER.HomeServie.getTiles);
+      //Get the 灯 color infomation
+      this.tileBulbUrl = PROXY.XsjsProxy(PROVIDER.HomeServie.getTileBulb);
+    },
+
+    /**
+     * Initialize te models
+     */
+    initModels: function() {
+      //Initialize the model for the tile
+      this.dashboardTileModel = new sap.ui.model.json.JSONModel();
+    },
+
+    /**
+     * Set data to models
+     */
+    setModelData: function() {
+      //Put this into that
+      var that = this;
+      /** @type {String} tile url */
+      var tileInfoUrl = this.tileInfoUrl;
+      /** @type {String} tile bulb url */
+      var tileBulbUrl = this.tileBulbUrl;
+
+      /** Handle lighting the bulbs in tiles */
+      var tileBulbHandler = function(data, model) {
+        //Array to put data
+        var bulbData = [];
+        data.forEach(function(tileData) {
+          bulbData = bulbData.concat(tileData.DATA);
+        });
+
+        /** @type {Element} [Light the bulb after tiles have rendered] */
+        var bulbs = $('.tile-bulb-icon');
+        bulbs.each(function(index, bulb) {
+          var bulbId = bulb.id;
+          var bulbType = bulbData[index].RYG;
+          var bulbColor = FORMATTER.kpiColorFormatter(bulbType);
+          sap.ui.getCore().byId(bulbId).setColor(bulbColor);
+        });
+        sap.ui.getCore().byId('overview-custom-tile').setBusy(false);
+      };
+
+      /**
+       * Handle set tile model and init tooltip and routers and splitor in the
+       * tiles
+       */
+      var dashboardHandler = function(data, model) {
+        model.setData(data);
+
+        setTimeout(function() {
+          that.addCustomizedElement();
+          that.initRouter();
+          that.initTileTooltip(data);
+        }, 200);
+
+        that.ajaxGet(tileBulbUrl, '', tileBulbHandler);
+      };
+
+      sap.ui.getCore().byId('overview-custom-tile').setBusy(true);
+      this.ajaxGet(tileInfoUrl, this.dashboardTileModel, dashboardHandler);
+
+      // 'http://10.82.116.85:8002/com/huawei/mes/dashboard/services/home/xsjs/getTilesKPIRYG.xsjs';
+      //this.ajaxGet(tileBulbUrl, '', tileBulbHandler);
+
+    },
+
+    /**
+     * Initialize the tooltip
+     * @param  {Object} data
+     */
+    initTileTooltip: function(data) {
+      var oBundle = this.oBundle;
+
+      // TODO
+      /** @type {Grid Layout} [Get overview grid layout] */
+      var tileOverview = sap.ui.getCore().byId('overview-custom-tile');
+      var tileData = data;
+      var tileLists = tileOverview.getContent();
+      /** get tile group in one box */
+      tileData.forEach(function(tileDataItem, tileListIndex) {
+        var tileList = tileLists[tileListIndex].getItems()[1];
+        /** get content in the tile box, most of time there are 4 tile boxes */
+        var tileboxes = tileList.getItems();
+        /** @type {data} [Get corresponding data for one box] */
+        var tileboxData = tileDataItem.DATA;
+        /** [Go through all tile boxes] */
+        tileboxes.forEach(function(tilebox, index) {
+          var tileboxDataEach = tileboxData[index];
+          var kpiName = tileboxDataEach.KPI_NAME;
+          var kpiUnit = huawei.cmes.util.commons.Formatters.unitFormatter(
+            tileboxDataEach.UNIT);
+          var targetValue = tileboxDataEach.T_VALUE; //目标值
+          var actualValue = tileboxDataEach.A_VALUE; //实际值
+          var owner = tileboxDataEach.OWNER_CN; //责任人
+          var lastUpdateDate = tileboxDataEach.LAST_UPDATE_DATE || ''; //最后修改
+
+          //var temps = targetValue.split(".");
+          //var result = temps[0]+temps[1].charAt(0);
+          //alert("result:"+(temps[1]+"").charAt(1));
+          //alert((targetValue+"").toFixed(1));
+          /**
+           * 修改人：xiezengguang xwx28628
+           */
+          if (kpiName === "MMIN" || kpiName === "CCN" || kpiName === "FCMR" || kpiName === "PY" || kpiName === "TCMR") {
+            //alert(targetValue);
+            if (targetValue != null || targetValue != "") {
+              var temp = targetValue.split(".");
+              temp = temp[0] + "." + (temp[1] + "").charAt(0);
+              //alert("temp:"+temp);
+              targetValue = temp;
+            }
+
+          }
+          /*
+              alert("kpiName:"+kpiName+",kpiUnit:"+kpiUnit+
+             ",targetValue:"+targetValue+",actualValue:"+actualValue+",owner:"+owner
+             +",lastUpdateDate:"+lastUpdateDate);
+          */
+
+          /** Listen every tile box */
+          $(tilebox.getDomRef()).hover(function(evt) {
+            var showtext = '';
+            /** Adjust the XY position */
+            var posotionX = evt.clientX + 25;
+            var posotionY = evt.clientY - 90;
+
+            /** Get the distance from the right margin */
+            var distanceFromRightMargin = $('body').width() - posotionX;
+            /** If the distance is less than 200px */
+            if (distanceFromRightMargin < 200) {
+              /** Set the start position of X 300px left */
+              posotionX = posotionX - 300;
+            }
+
+            /** Give every tooltip name, tooltip is the object to store the name */
+            if (sap.tooltip === undefined) {
+              sap.tooltip = {};
+            }
+
+            /** If no tooltip or enter different tooltip, create a new tooltip */
+            if ($('.tooltip').length === 0 || sap.tooltip.name !==
+              tileListIndex + '-' + index) {
+
+              showtext += '<div class="tooltip" style="left:' +
+                posotionX + 'px;top:' + posotionY + 'px">';
+
+              /** @type {String} [HTML String for KPI names] */
+              var tooltipNameText = '<div class="tooltip-name">';
+              tooltipNameText += '<p><b>' + oBundle.getText(
+                'TooltipKPI') + ':</b></p><br>';
+              tooltipNameText += '<p><b>' + oBundle.getText(
+                'TooltipActual') + ':</b></p>';
+
+              /** If KPI is FCV or TIV DO not show Target Value */
+              if (kpiName !== 'FCV' && kpiName !== 'TIV' && kpiName !==
+                'TCV' && kpiName !== 'PIV') {
+                tooltipNameText += '<br><p><b>' + oBundle.getText(
+                  'TooltipTarget') + ':</b></p>';
+              }
+              //Add Owner
+              tooltipNameText += '<br><p><b>' + oBundle.getText(
+                'owner') + ':</b></p>';
+              //Add Last Update Date Label
+              tooltipNameText += '<br><p><b>' + oBundle.getText(
+                'lastUpdateDate') + ':</b></p>';
+
+              tooltipNameText += '</div>';
+
+              /** @type {String} [HTML String for KPI Values] */
+              var tooltipValue = '<div class="tooltip-value">';
+              tooltipValue += '<p>' + FORMATTER.kpiNameFormatter(
+                kpiName) + '</p><br>';
+              tooltipValue += '<p>' + FORMATTER.kpiValueTooltipFormatter(
+                actualValue) + kpiUnit + '</p>';
+
+              /** If KPI is FCV or TIV DO not show Target Value */
+              if (kpiName !== 'FCV' && kpiName !== 'TIV' && kpiName !==
+                'TCV' && kpiName !== 'PIV') {
+                tooltipValue += '<br><p>' + targetValue + kpiUnit +
+                  '</p>';
+              }
+              tooltipValue += '<br><p>' + owner + '</p>';
+              //Add Last Update Date Value
+              tooltipValue += '<br><p>' + lastUpdateDate + '</p>';
+
+              tooltipValue += '</div>';
+
+              //Finish the show text
+              showtext += tooltipNameText + tooltipValue;
+              $('body').append(showtext);
+            }
+
+            /** Put the name of the new tooltip in tooltip.name */
+            sap.tooltip.name = tileListIndex + '-' + index;
+
+            /** Remove all tooltip except the new one */
+            var length = $('.tooltip').length;
+            $('.tooltip').each(function(index, tooltip) {
+              if (index !== length - 1) {
+                $(tooltip).remove();
+              }
+            });
+
+            /** Give the new tooltip listener */
+            $('.tooltip').hover(function(toolEvt) {
+              /** If mouse enter tooltip, give the true to ontooltip */
+              sap.ontooltip = true;
+            }, function() {
+              /** If mouse leave tooltip, give the false to ontooltip */
+              sap.ontooltip = false;
+              /** If mouse leave tooltip, Remove all tooltip */
+              $('.tooltip').remove();
+            });
+
+          }, function() {
+            /** Give time for mouse to enter tooltip before tooltip disappears */
+            // /console.log(sap.ontooltip);
+          });
+
+          $('.tile-module').hover(function() {
+
+          }, function() {
+            setTimeout(function() {
+              // console.log(sap.ontooltip);
+              /**
+               * If mouse on tooltip, delete all tooltip except the latest
+               * created one
+               */
+              if (sap.ontooltip === false) {
+                $('.tooltip').remove();
+              } else {
+
+              }
+            }, 5);
+          });
+
+          // tilebox.setTooltip(tooltip);
+        });
+
+      });
+    },
+
+    /**
+     * Set the language
+     */
+    languageSetting: function() {
+      var sLocale = localStorage.getItem('LANG-KEY') || '';
+      this.oBundle = jQuery.sap.resources({
+        url: "i18n/messageBundle.properties",
+        locale: sLocale
+      });
+    },
+
+    /**
+     * show the time period for the page
+     */
+    onAfterRendering: function() {
+      this.initRouter();
+
+      //Set the initial time stamp string
+      var firstDayOfYear = new Date().getFullYear() + '-01-01';
+
+      var monthNumber = new Date().getMonth();
+
+      var year = new Date().getFullYear(); //Year
+      var month = monthNumber === 12 ? 1 : monthNumber + 1; //Month
+      var day = new Date().getDate(); //Day
+      month = month < 10 ? '0' + month : month; //example 9 to 09
+      day = day < 10 ? '0' + day : day; // example 9 to 09
+
+      var today = year + '-' + month + '-' + day; //example 2015-09-02
+
+      //Get translations
+      var showDateSelect = sap.oBundle.getText('TimePeriod');
+      showDateSelect += (firstDayOfYear + ' - ' + today);
+
+      //Set the text on the top right of the page
+      this.byId('time-stamp').setText(showDateSelect);
+    },
+
+    /**
+     * Ajax Get Method
+     *
+     * @param url
+     * @param model
+     * @param func
+     */
+    ajaxGet: HTTP.ajaxGet,
+
+    /**
+     * Ajax Post Method
+     *
+     * @param url
+     * @param func
+     * @param model
+     */
+    ajaxPost: HTTP.ajaxPost,
+
+    /**
+     * Add the splitor on page to divide the 4 tiles on page
+     */
+    addCustomizedElement: function() {
+      //The splitor in the four modules
+      var splitorElement = '<div class="splitor"></div>';
+      //Get the width of the document
+      var width = document.body.scrollWidth;
+      //Get the spliter number, to check whehter the spliter exist
+      var splitorNumber = $('.splitor').length;
+
+      //Add listener when window is resized
+      $(window).resize(function() {
+        //get the width of document
+        width = document.body.scrollWidth;
+        splitorNumber = $('.splitor').length;
+
+        if (splitorNumber !== 0 && width < 1024) {
+          //WHen the width < 1024, remove the spliter
+          $('.splitor').remove();
+        } else if (splitorNumber === 0 && (width === 1024 || width > 1024)) {
+          //If the width >= 1024, add the spliter
+          $('#overview-custom-tile').append(splitorElement);
+        }
+      });
+      //If the width >= 1024, add the spliter
+      if (splitorNumber === 0 && (width >= 1024)) {
+        $('#overview-custom-tile').append(splitorElement);
+      }
+    },
+
+    /**
+     * Initialize the build data
+     * @param  {Object} allDimensionData
+     * @return {Object}
+     */
+    initialBuildData: function(allDimensionData) {
+      //Copy all dimension data
+      var dimensions = jQuery.extend({}, allDimensionData);
+      //Get the end date
+      var endDate = getYyyymmdd(new Date());
+      //Construct the date string
+      var startYear = new Date().getFullYear() - 1;
+      var startMonth = new Date().getMonth();
+      var startDay = new Date().getDate();
+      var startTime = new Date().setFullYear(startYear, startMonth,
+        startDay);
+      var startDate = getYyyymmdd(new Date(startTime));
+      //The period type
+      var period = 'MONTH';
+
+      var buildChartData = {
+        DIMENSIONS: dimensions,
+        DATE: {
+          "START_DATE": startDate,
+          "END_DATE": endDate
+        }
+      };
+      //Return the build chart data
+      return buildChartData;
+    },
+
+    /**
+     * Initialize the routers to seperate pages - quality|delivery|dashboard
+     */
+    initRouter: function() {
+      //      var favUrl = "";
+      var moduleUrlMapping = {
+        N01: 'quality.html?kpiType=00',
+        N02: 'delivery.html',
+        T01: 'quality.html?kpiType=01',
+        T02: 'delivery.html'
+      };
+      //Urls to jump
+      var pageUrls = ['dashboard.html', 'customer.html', 'engineering.html'];
+
+      /**
+       * open the url
+       */
+      var navTo = function(url) {
+        window.open(url);
+      };
+
+      /**
+       * Departments Navigator panel
+       */
+      $('.tile-module').each(function(index, item) {
+        item.onclick = function() {
+          //Get the data
+          var moduleData = sap.ui.getCore().byId('overview-custom-tile').getModel().getData();
+          //Get the corrsponding data for the tile module
+          var currentData = moduleData[index];
+          //Get the CNAME
+          var moduleTypeName = currentData.CNAME;
+          //get the url
+          var mappingUrl = moduleUrlMapping[moduleTypeName];
+          //Navigate to the target page
+          navTo(mappingUrl);
+        };
+      });
+
+      /**
+       * Navigator Panel
+       */
+      $('.navigator-tile').each(function(index, item) {
+        item.onclick = function() {
+          if (index === 1) {
+            var msg = 'Coming Soon !  :-)';
+            sap.m.MessageToast.show(msg);
+          } else {
+            navTo(pageUrls[index]);
+          }
+        };
+      });
+
+    },
+    /***************************************************************************
+     * Event: Tiles linked to detailed page
+     **************************************************************************/
+    /**
+     * handle tile press event - not in use
+     * @param  {oEvent} oEvent
+     */
+    handleTilePress: function(oEvent) {
+      //Get the id
+      var componentData = sap.ui.getCore().byId(oEvent.getParameter("id"));
+      //Get the name in the target data
+      var sComponent = componentData.data("name");
+      //Get the kpiType in the target data
+      var kpiType = componentData.data("kpiType");
+      //Consist the href
+      var sRef = sComponent + ".html?kpiType=" + kpiType;
+      //Jump to the page
+      sap.m.URLHelper.redirect(sRef, true);
+    },
+
+    /***************************************************************************
+     * Event: Open dialog of creating group
+     **************************************************************************/
+    /**
+     * Add category
+     * @param  {oEvent} oEvent
+     */
+    onPressAddCategory: function(oEvent) {
+      //Put this into that
+      var that = this;
+      //Get the button
+      var oButton = oEvent.getSource();
+
+      /** @type {sap.m.Popover} create the popover */
+      var popOver = new sap.m.Popover({
+        placement: sap.m.PlacementType.Bottom,
+        showHeader: false
+      });
+
+      /** Create language list - chinese|english */
+      var languageList = new sap.m.List({
+        mode: "SingleSelectMaster",
+        selectionChange: function(evt) {
+          that.handleCtgMenuItemPress(evt);
+        },
+        items: [new sap.m.StandardListItem({
+          adaptTitleSize: true,
+          title: that.oBundle.getText('addCategory')
+        }).addStyleClass('item-title'), new sap.m.StandardListItem({
+          adaptTitleSize: true,
+          title: that.oBundle.getText('deleteCtg')
+        }).addStyleClass('item-title')]
+      });
+
+      /** Add language list to language popover */
+      popOver.addContent(languageList);
+
+      /** Open the popover */
+      jQuery.sap.delayedCall(0, this, function() {
+        popOver.openBy(oButton);
+      });
+    },
+
+
+    /**
+     * search kpi
+     * @param  {oEvent} oEvt
+     */
+    onSearchKpi1: function(oEvt) {
+      // add filter for search
+
+      var sQuery = oEvt.getSource().getValue();
+      var filter = [];
+      if (sQuery && sQuery.length > 0) {
+        /*var filter = new sap.ui.model.Filter("COMPONENT_NAME_CN", sap.ui.model
+          .FilterOperator.Contains, sQuery);
+        aFilters.push(filter);*/
+        var filter_kpi = new sap.ui.model.Filter("KPI_ID", sap.ui.model
+          .FilterOperator.Contains, sQuery);
+
+        var filter_ctg = new sap.ui.model.Filter("GROUP_NAME", sap.ui.model
+          .FilterOperator.Contains, sQuery);
+
+        filter = new sap.ui.model.Filter({
+          filters: [filter_kpi, filter_ctg],
+          and: false
+        });
+      }
+
+      var list = null;
+      var currentContent = sap.ui.getCore().byId("idaddKPIHeadText").getText();
+
+      if (currentContent == oBundle.getText('deleteCtg')) {
+        list = sap.ui.getCore().byId("delCtgList");
+      } else {
+        list = sap.ui.getCore().byId("delKPIList");
+      }
+      // update list binding
+
+      var binding = list.getBinding("items");
+      binding.filter(filter, "Application");
+    },
+
+    onSearchKpi2: function(oEvt) {
+      // add filter for search
+      var aFilters = [];
+      var sQuery = oEvt.getSource().getValue();
+      if (sQuery && sQuery.length > 0) {
+        var filter = new sap.ui.model.Filter("KPI_NAME_CN", sap.ui.model.FilterOperator
+          .Contains, sQuery);
+        aFilters.push(filter);
+      }
+
+      // update list binding
+      var list = sap.ui.getCore().byId("kpiDetailsList");
+      var binding = list.getBinding("items");
+      binding.filter(aFilters, "Application");
+    },
+
+    /***************************************************************************
+     * Event: create group event in creating group dialog
+     **************************************************************************/
+    /**
+     * Call this function when add category finished
+     * @param {oEvent} e
+     */
+    addCategoryOKBtn: function(e) {
+      var Group_Index = this.createIndex(this._favoritesModel.oData,
+        "GROUP_INDEX");
+
+      var _favoritesModel = new sap.ui.model.json.JSONModel();
+      var oData = [];
+      oData = this._favoritesLocal.concat(this._favoritesModel.oData);
+      _favoritesModel.setData(oData);
+
+      var Group_Name = sap.ui.getCore().byId("newCategoryTxt").mProperties.value;
+      for (var i = 0; i < _favoritesModel.oData.length; i++) {
+        // alert(this._favoritesModel.oData[i].GROUP_NAME);
+        if (_favoritesModel.oData[i].GROUP_NAME === Group_Name) {
+          sap.ui.commons.MessageBox.alert(this.oBundle.getText('DUAL_CATEGORY') + " !");
+          return;
+        }
+      }
+
+      var newAddCtg = {
+        'GROUP_INDEX': Group_Index,
+        'GROUP_NAME': Group_Name,
+        'KPI_COLLECTION': {}
+      };
+
+      this._favoritesLocal.push(newAddCtg);
+      _favoritesModel.oData.push(newAddCtg);
+
+      /*this._favoritesModel.setData(this._favoritesModel.oData, false);*/
+      sap.ui.getCore().byId("categoryList").setModel(_favoritesModel);
+      sap.ui.getCore().byId("addCategoryDialog").close();
+    },
+
+    /**
+     * Call this functin when cancel category adding
+     * @param {oEvent} e
+     */
+    addCategoryCancelBtn: function(e) {
+      sap.ui.getCore().byId("addCategoryDialog").close();
+    },
+
+    /***************************************************************************
+     * Event: Menu Add KPI/Delete KPI
+     **************************************************************************/
+    /**
+     * Add KPI
+     * @param  {oEvent} oEvent
+     */
+    onPressOperKPI: function(oEvent) {
+      var that = this;
+      this.resetBuffer();
+      var oButton = oEvent.getSource();
+      var popOver = new sap.m.Popover({
+        placement: sap.m.PlacementType.Bottom,
+        showHeader: false
+      });
+      /** Create KPI list */
+      var kpiList = new sap.m.List({
+        mode: "SingleSelectMaster",
+        selectionChange: function(evt) {
+          that.handleMenuItemPress(evt);
+        },
+        items: [new sap.m.StandardListItem({
+          adaptTitleSize: true,
+          title: that.oBundle.getText('AddKpi')
+        }).addStyleClass('item-title'), new sap.m.StandardListItem({
+          adaptTitleSize: true,
+          title: that.oBundle.getText('DelKpi')
+        }).addStyleClass('item-title')]
+      });
+
+      /** Add KPI list to popover */
+      popOver.addContent(kpiList);
+
+      /** Open the popover */
+      jQuery.sap.delayedCall(0, this, function() {
+        popOver.openBy(oButton);
+      });
+
+    },
+
+    /** handle kpi add & delete */
+    handleMenuItemPress: function(evt) {
+
+      var list = evt.getSource();
+      var index = this.getSelectedIndex(list);
+      if (index === 0) {
+        this.handleAddMenuItemPress();
+      } else if (index === 1) {
+        this.handleDelMenuItemPress();
+      }
+    },
+
+    /** handle category add & delete */
+    handleCtgMenuItemPress: function(evt) {
+      var list = evt.getSource();
+      var index = this.getSelectedIndex(list);
+      if (index === 0) {
+        this.handleAddCtgMenuItemPress();
+      } else if (index === 1) {
+        this.handleDelCtgMenuItemPress();
+      }
+    },
+
+    /** open category press event */
+    handleAddCtgMenuItemPress: function() {
+      sap.ui.getCore().byId("addCategoryDialog").open();
+    },
+
+    /**
+     * handle add items
+     * @param  {oEvent} oEvent
+     */
+    handleAddMenuItemPress: function(oEvent) {
+      var oBundle = this.oBundle;
+      sap.ui.getCore().byId("selectKPIDialog").removeAllContent();
+      sap.ui.getCore().byId("selectKPIDialog").addContent(sap.ui.getCore().byId(
+        "kpiComponentList"));
+      sap.ui.getCore().byId("idaddKPICancelButton").setWidth("100%");
+      sap.ui.getCore().byId("idaddKPIOKButton").setVisible(false);
+      sap.ui.getCore().byId("addKPIbackButton").setVisible(false);
+      sap.ui.getCore().byId("idaddKPIHeadText").setText(oBundle.getText(
+        'addKPI'));
+      sap.ui.getCore().byId("selectKPIDialog").open();
+
+    },
+
+    /**
+     * Handle delete category
+     */
+    handleDelCtgMenuItemPress: function() {
+      var oBundle = this.oBundle;
+      sap.ui.getCore().byId("selectKPIDialog").removeAllContent();
+      sap.ui.getCore().byId("selectKPIDialog").addContent(sap.ui.getCore().byId(
+        "delCtgList"));
+      sap.ui.getCore().byId("delCtgList").removeSelections();
+      sap.ui.getCore().byId("idaddKPICancelButton").setWidth("50%");
+      sap.ui.getCore().byId("idaddKPICancelButton").setVisible(true);
+      sap.ui.getCore().byId("idaddKPIOKButton").setWidth("50%");
+      sap.ui.getCore().byId("idaddKPIOKButton").setVisible(true);
+
+      sap.ui.getCore().byId("addKPIbackButton").setVisible(false);
+      sap.ui.getCore().byId("idaddKPIHeadText").setText(oBundle.getText(
+        'deleteCtg'));
+      sap.ui.getCore().byId("selectKPIDialog").open();
+      this._selectedItems = [];
+      this._kpiType = '0';
+      this._addKPI = {};
+    },
+
+    /**
+     * handle delete kpi
+     * @param  {oEvent} oEvent
+     */
+    handleDelMenuItemPress: function(oEvent) {
+      var oBundle = this.oBundle;
+      sap.ui.getCore().byId("selectKPIDialog").removeAllContent();
+      sap.ui.getCore().byId("selectKPIDialog").addContent(sap.ui.getCore().byId(
+        "delKPIList"));
+      sap.ui.getCore().byId("idaddKPICancelButton").setWidth("50%");
+      sap.ui.getCore().byId("idaddKPICancelButton").setVisible(true);
+      sap.ui.getCore().byId("idaddKPIOKButton").setWidth("50%");
+      sap.ui.getCore().byId("idaddKPIOKButton").setVisible(true);
+
+      sap.ui.getCore().byId("addKPIbackButton").setVisible(false);
+      sap.ui.getCore().byId("idaddKPIHeadText").setText(oBundle.getText(
+        'deleteKPI'));
+
+      var sFilter = "?&userId='" + this._userId + "'";
+      /** @type {String} delete kpi url */
+      var xsjsUrl = huawei.cmes.util.services.Provider.HomeServie.getKPIListForDEL;
+      this._favoritesKPIForDelModel = new sap.ui.model.json.JSONModel(
+        huawei.cmes.util.services.Proxy.XsjsProxy(xsjsUrl, sFilter));
+
+      /** set model */
+      sap.ui.getCore().byId("delKPIList").setModel(this._favoritesKPIForDelModel);
+      /** set model the new data after the request has been completed */
+      this._favoritesKPIForDelModel
+        .attachRequestCompleted(
+          function() {
+            sap.ui.getCore().byId("selectKPIDialog").open();
+          });
+
+      this._selectedItems = [];
+      this._kpiType = '0';
+      this._addKPI = {};
+    },
+
+    /***************************************************************************
+     * Event: select Component List => then go to network/terminal KPI list
+     **************************************************************************/
+    /** Handle KPI List press */
+    handleKPIComponentPress: function(oEvent) {
+      // change list binding
+      sap.ui.getCore().byId("selectKPIDialog").removeAllContent();
+      sap.ui.getCore().byId("selectKPIDialog").addContent(sap.ui.getCore().byId(
+        "kpiDetailsList"));
+      sap.ui.getCore().byId("addKPIbackButton").setVisible(true);
+      sap.ui.getCore().byId("idaddKPIOKButton").setWidth("50%");
+      sap.ui.getCore().byId("idaddKPICancelButton").setWidth("50%");
+      sap.ui.getCore().byId("idaddKPIOKButton").setVisible(true);
+
+      sap.ui.getCore().byId("kpi-search-field-1").setVisible(false);
+      sap.ui.getCore().byId("kpi-search-field-1").setValue('');
+      sap.ui.getCore().byId("kpi-search-field-2").setVisible(true);
+
+      sap.ui.getCore().byId("kpiDetailsList").setModel(this._oModel);
+      // default bind extensive network
+
+      //@Rita add selected kpi 
+      for (var i = 0; i < this._selectedItems.length; i++) {
+        this._batAddItems[this._kpiType].push(this._selectedItems[i]);
+      }
+      this._selectedItems = [];
+
+
+      var emp = oEvent.mParameters.id.split('-');
+      this._addKPI.selected_ComponentIndex = emp[emp.length - 1];
+
+      sap.ui.getCore().byId("kpiDetailsList").bindItems('/' + this._addKPI.selected_ComponentIndex +
+        '/KEY_COLLECTION_' + this._kpiType, new sap.m.StandardListItem({
+          title: {
+            path: 'KPI_KEY',
+            formatter: huawei.cmes.util.commons.Formatters.addKPIFormatter
+          },
+          tooltip: {
+            path: 'KPI_KEY',
+            formatter: huawei.cmes.util.commons.Formatters.addKPIFormatter
+          },
+          type: sap.m.ListType.Active,
+          selected: false
+            // this.handleKPIListPress(this)
+        }), this._oModel.oData);
+
+      //@Rita recover selection status
+      var selectedKPI = this._batAddItems[this._kpiType];
+      var kpiDetailsList = sap.ui.getCore().byId("kpiDetailsList").getItems();
+      for (i = 0; i < selectedKPI.length; i++) {
+        for (var j = 0; j < kpiDetailsList.length; j++) {
+          if (kpiDetailsList[j].getBindingContextPath() === selectedKPI[i]) {
+            kpiDetailsList[j].setSelected(true);
+          }
+        }
+      }
+
+      sap.ui.getCore().byId("categoryList").attachItemPress(this.handleCategoryListPress,
+        this);
+    },
+
+    /***************************************************************************
+     * Event: select target group for insert
+     **************************************************************************/
+    /** Handle Category List press */
+    handleCategoryListPress: function(oEvent) {
+      this._addKPI.TargetGroup_Name = oEvent.mParameters.listItem.mProperties
+        .title;
+      var oDatafavorits = this._favoritesLocal.concat(this._favoritesModel.oData);
+      for (var i = 0; i < oDatafavorits.length; i++) {
+        if (oDatafavorits[i].GROUP_NAME === this._addKPI.TargetGroup_Name) {
+          this._addKPI.TargetGroup_Index = oDatafavorits[i].GROUP_INDEX;
+          this._addKPI.forecast_KPI_Index = this.createIndex(oDatafavorits[
+            i].KPI_COLLECTION, "KPI_INDEX");
+          break;
+        }
+      }
+    },
+
+    // Invoked in the "onAddKPIOKButton" function
+    /***************************************************************************
+     * Invoke Insert Jquery.Ajax function
+     **************************************************************************/
+    addSelectedKPItoCategory: function() {
+      var that = this;
+      var addData = [];
+      // this._addKPI_kpiType = 0;
+      var displayedString = this.byId("FavoriteVBox").sId + ",'" + this._userId +
+        "'";
+
+      var sServiceUrl = huawei.cmes.util.services.Proxy.XsjsProxy(huawei.cmes
+        .util.services.Provider.HomeServie.batInsert);
+      var compIndex = '';
+      var subCompIndex = '';
+      for (var i = 0; i < this._batAddItems.length; i++) {
+        for (var j = 0; j < this._batAddItems[i].length; j++) {
+          compIndex = this._batAddItems[i][j].split('/')[1];
+          subCompIndex = this._batAddItems[i][j].split('/')[2].split('_').pop();
+          addData.push({
+            "KPI_ID": this._oModel.oData[compIndex]
+              ["KEY_COLLECTION_" + subCompIndex][this.getSelectedPath(this._batAddItems[
+                i][j])].KPI_ID,
+            "KPI_INDEX": this._addKPI.forecast_KPI_Index,
+            "USER_ID": this._userId,
+            "GROUP_INDEX": this._addKPI.TargetGroup_Index,
+            "GROUP_NAME": this._addKPI.TargetGroup_Name,
+          });
+          this._addKPI.forecast_KPI_Index = huawei.cmes.util.commons.Formatters
+            .stringAutoPlus(this._addKPI.forecast_KPI_Index, 1);
+        }
+      }
+
+      $.ajax({
+        url: sServiceUrl,
+        type: 'GET',
+        beforeSend: function(xhr) {
+          xhr.setRequestHeader("X-CSRF-Token", "Fetch");
+        }
+      }).done(function(data, textStatus, XMLHttpRequest) {
+        var token = XMLHttpRequest.getResponseHeader('X-CSRF-Token');
+        $.ajax({
+          url: sServiceUrl,
+          headers: {
+            "Content-Type": "application/json"
+          },
+          type: 'POST',
+          data: encodeURIComponent(JSON.stringify(addData)),
+          beforeSend: function(xhr) {
+            xhr.setRequestHeader("X-CSRF-Token", token);
+          }
+        }).done(function(data, textStatus, XMLHttpRequest) {
+
+          //Added
+          for (var i = 0; i < that._favoritesLocal.length; i++) {
+            if (that._favoritesLocal[i].GROUP_NAME === that._addKPI.TargetGroup_Name) {
+              that._favoritesLocal.splice(i, 1);
+              break;
+            }
+          }
+
+          // console.log(displayedString);
+          var para = displayedString.split(',');
+          var sFilter = "?&userId=" + para[1];
+
+          var xsjsUrl = huawei.cmes.util.services.Provider.HomeServie.getUserFavoriteKPI;
+          xsjsUrl = huawei.cmes.util.services.Proxy.XsjsProxy(xsjsUrl, sFilter);
+
+          var deleteDataNewDataHandler = function(data, model) {
+            model.setData(data);
+          };
+
+          that.ajaxGet(xsjsUrl, that._favoritesModel, deleteDataNewDataHandler);
+
+          sap.ui.getCore().byId(para[0]).setModel(that._favoritesModel);
+          sap.ui.getCore().byId("addCategoryDialog").close();
+
+
+        }).fail(function(erroutside) {
+          sap.ui.commons.MessageBox.alert(
+            "Network Error,please check with Administrator!");
+        });
+      }).fail(function(erroutside) {
+        sap.ui.commons.MessageBox.alert(
+          "Network Error,please check with Administrator!");
+      });
+    },
+
+    /***************************************************************************
+     * Event for both Insert/Delete list select/deselect event
+     **************************************************************************/
+    onSelectionChange: function(oEvent) {
+
+      this._selectedItems = oEvent.oSource._aSelectedPaths;
+      if (oEvent.getParameter('id') !== 'delCtgList') {
+        for (var i = 0; i < this._batAddItems[this._kpiType].length; i++) {
+          if (this._batAddItems[this._kpiType][i].split('/')[1] === this._addKPI.selected_ComponentIndex) {
+            this._batAddItems[this._kpiType].splice(i, 1);
+            i--;
+          }
+        }
+      }
+
+    },
+
+    //TODO
+    deleteSelectedCtg: function() {
+      var that = this;
+      var delPostData = [];
+
+      var uid = this._userId;
+      var sServiceUrl = huawei.cmes.util.services.Proxy.XsjsProxy(huawei.cmes
+        .util.services.Provider.HomeServie.batDeleteCtg);
+      var selectedCtgs = sap.ui.getCore().byId('delCtgList').getSelectedItems();
+
+      if (selectedCtgs.length === 0) {
+        return;
+      }
+
+      for (var i = 0; i < selectedCtgs.length; i++) {
+        delPostData.push({
+          "USER_ID": uid,
+          "GROUP_NAME": selectedCtgs[i].getTitle(),
+        });
+      }
+      $.ajax({
+        url: sServiceUrl,
+        type: 'GET',
+        beforeSend: function(xhr) {
+          xhr.setRequestHeader("X-CSRF-Token", "Fetch");
+        }
+      }).done(function(data, textStatus, XMLHttpRequest) {
+        var token = XMLHttpRequest.getResponseHeader('X-CSRF-Token');
+
+        $.ajax({
+          url: sServiceUrl,
+          headers: {
+            "Content-Type": "application/json"
+          },
+          type: 'POST',
+          data: encodeURIComponent(JSON.stringify(delPostData)),
+          beforeSend: function(xhr) {
+            xhr.setRequestHeader("X-CSRF-Token", token);
+          }
+        }).done(function(data, textStatus, XMLHttpRequest) {
+
+          var sFilter = "?&userId='" + uid + "'";
+          var xsjsUrl = huawei.cmes.util.services.Provider.HomeServie.getUserFavoriteKPI;
+          xsjsUrl = huawei.cmes.util.services.Proxy.XsjsProxy(xsjsUrl, sFilter);
+          //              that._favoritesModel = new sap.ui.model.json.JSONModel(huawei
+          //                .cmes.util.services.Proxy.XsjsProxy(xsjsUrl, sFilter));
+          var deleteDataNewDataHandler = function(data, model) {
+            model.setData(data);
+          };
+
+          that.ajaxGet(xsjsUrl, that._favoritesModel, deleteDataNewDataHandler);
+
+
+          sap.ui.getCore().byId("categoryList").setModel(that._favoritesModel);
+          sap.ui.getCore().byId("addCategoryDialog").close();
+        }).fail(function(erroutside) {
+          sap.ui.commons.MessageBox.alert(
+            "Network Error,please check with Administrator!");
+        });
+
+      }).fail(function(erroutside) {
+        sap.ui.commons.MessageBox.alert(
+          "Network Error,please check with Administrator!");
+      });
+
+    },
+
+    /***************************************************************************
+     * Invoke delete Jquery.Ajax function
+     **************************************************************************/
+    deleSelectedKPI: function() {
+      var that = this;
+      var delData = [];
+      var displayedString = this.byId("FavoriteVBox").sId + ",'" + this._userId +
+        "'";
+      // var sServiceUrl =
+      // "proxy/home/xsjs/batDeleteFavoriteList.xsjs";
+      var sServiceUrl = huawei.cmes.util.services.Proxy.XsjsProxy(huawei.cmes
+        .util.services.Provider.HomeServie.batDelete);
+      if (this._selectedItems.length === 0) {
+        return;
+      }
+      for (var i = 0; i < this._selectedItems.length; i++) {
+        delData.push({
+          "USER_ID": this._userId,
+          "KPI_ID": this._favoritesKPIForDelModel.oData[this._selectedItems[
+            i].substring(1)].KPI_ID,
+          "GROUP_NAME": this._favoritesKPIForDelModel.oData[this._selectedItems[
+            i].substring(1)].GROUP_NAME,
+        });
+      }
+      $.ajax({
+        url: sServiceUrl,
+        type: 'GET',
+        beforeSend: function(xhr) {
+          xhr.setRequestHeader("X-CSRF-Token", "Fetch");
+        }
+      }).done(function(data, textStatus, XMLHttpRequest) {
+        var token = XMLHttpRequest.getResponseHeader('X-CSRF-Token');
+        $.ajax({
+          url: sServiceUrl,
+          headers: {
+            "Content-Type": "application/json"
+          },
+          type: 'POST',
+          data: encodeURIComponent(JSON.stringify(delData)),
+          beforeSend: function(xhr) {
+            xhr.setRequestHeader("X-CSRF-Token", token);
+          }
+        }).done(function(data, textStatus, XMLHttpRequest) {
+
+          // console.log(displayedString);
+          var para = displayedString.split(',');
+
+          var sFilter = "?&userId=" + para[1];
+          var xsjsUrl = huawei.cmes.util.services.Provider.HomeServie.getUserFavoriteKPI;
+          xsjsUrl = huawei.cmes.util.services.Proxy.XsjsProxy(xsjsUrl, sFilter);
+          sap.ui.getCore().byId("addCategoryDialog").close();
+          var deleteDataNewDataHandler = function(data, model) {
+            model.setData(data);
+            sap.ui.getCore().byId(para[0]).setModel(that._favoritesModel);
+            var downArrow = 'sap-icon://navigation-down-arrow';
+            that.byId('additional-button').setIcon(downArrow);
+          };
+
+          that.ajaxGet(xsjsUrl, that._favoritesModel, deleteDataNewDataHandler);
+
+        }).fail(function(erroutside) {
+          sap.ui.commons.MessageBox.alert(
+            "Network Error,please check with Administrator!");
+        });
+      }).fail(function(erroutside) {
+        sap.ui.commons.MessageBox.alert(
+          "Network Error,please check with Administrator!");
+      });
+
+    },
+    /***************************************************************************
+     * Common Dialog Operation(OK/Cancel/Back)
+     **************************************************************************/
+    /**
+     * Call this function when cancel add kpi
+     * @param  {oEvent} oEvent
+     */
+    onAddKPICancelButton: function(oEvent) {
+      this.resetBuffer();
+      var oBundle = this.oBundle;
+      sap.ui.getCore().byId("selectKPIDialog").close();
+      sap.ui.getCore().byId("idaddKPIHeadText").setText(oBundle.getText(
+        'addKPI'));
+    },
+    /**
+     * Call this function when confirm add kpi
+     * @param  {[type]} oEvent [description]
+     * @return {[type]}        [description]
+     */
+    onAddKPIOKButton: function(oEvent) {
+      var oBundle = this.oBundle;
+      var currentContent = sap.ui.getCore().byId("idaddKPIHeadText").getText();
+
+      //Updated:
+
+      if (currentContent == oBundle.getText('deleteCtg')) {
+        this.deleteSelectedCtg();
+        sap.ui.getCore().byId("selectKPIDialog").close();
+        this.resetBuffer();
+      }
+
+      if (currentContent == oBundle.getText('addKPI')) {
+
+        // change list binding
+        sap.ui.getCore().byId("selectKPIDialog").removeAllContent();
+        sap.ui.getCore().byId("selectKPIDialog").addContent(sap.ui.getCore()
+          .byId("categoryList"));
+        sap.ui.getCore().byId("idaddKPIHeadText").setText(oBundle.getText(
+          'addKPITo'));
+
+      } else if (currentContent == oBundle.getText('addKPITo')) {
+        // this._obusyDialog.open();
+        if (this._selectedItems.length > 0)
+          for (var i = 0; i < this._selectedItems.length; i++) {
+            this._batAddItems[this._kpiType].push(this._selectedItems[i]);
+          }
+        this._selectedItems = [];
+
+        var downArrow = 'sap-icon://navigation-down-arrow';
+        this.byId('additional-button').setIcon(downArrow);
+
+        // add selected KPI to Category
+        this.addSelectedKPItoCategory();
+        sap.ui.getCore().byId("selectKPIDialog").close();
+        this.resetBuffer();
+        // this._obusyDialog.close();
+      } else if (currentContent == oBundle.getText('deleteKPI')) {
+        // add selected KPI to Category
+        this.deleSelectedKPI();
+        sap.ui.getCore().byId("selectKPIDialog").close();
+        this.resetBuffer();
+        // this._obusyDialog.close();
+      }
+    },
+
+    /***************************************************************************
+     * Event: Menu Search KPI Dictionary
+     **************************************************************************/
+    onPressSearchKPI: function(oEvent) {
+      var msg = 'Coming Soon !  :-)';
+      sap.m.MessageToast.show(msg);
+    },
+
+    /**
+     * Call this function when additional button is clicked
+     */
+    onAdditionalButtonPress: function() {
+
+      var icon = this.byId('additional-button').getIcon();
+      var downArrow = 'sap-icon://navigation-down-arrow';
+      var upArrow = 'sap-icon://navigation-up-arrow';
+
+      if (icon === downArrow) {
+        this.byId('additional-button').setIcon(upArrow);
+        $('.tile-label').bind('mouseenter', function() {
+          var $this = $(this);
+
+          if (this.offsetWidth < this.scrollWidth && !$this.attr('title')) {
+            $this.attr('title', $this.text());
+          }
+        });
+      } else {
+        this.byId('additional-button').setIcon(downArrow);
+      }
+
+      if ($('.fav-begin').length) {
+        $('.fav-begin').removeClass('fav-begin');
+      } else {
+        $('.fav-panel').fadeToggle();
+      }
+
+      this.initRouter(); // add navigator for favorite tiles
+    },
+
+    /**
+     * Call this function when language selection is confirmed
+     * @param  {oEvent} oEvent
+     */
+    onLanguageSelection: function(oEvent) {
+      var that = this;
+      var popOver = new sap.m.Popover({
+        placement: sap.m.PlacementType.Bottom,
+        showHeader: false
+      });
+
+      var languageList = new sap.m.List({
+        mode: "SingleSelectMaster",
+        width: '180px',
+        selectionChange: function(evt) {
+          var list = evt.getSource();
+          var index = that.getSelectedIndex(list);
+          localStorage.clear();
+          if (index === 0) {
+            localStorage.setItem('LANG-KEY', 'en-US');
+          } else if (index === 1) {
+            localStorage.setItem('LANG-KEY', 'zh-CN');
+          }
+          popOver.close();
+          location.reload();
+        },
+        items: [new sap.m.StandardListItem({
+          adaptTitleSize: true,
+          title: that.oBundle.getText('English')
+        }).addStyleClass('item-title'), new sap.m.StandardListItem({
+          adaptTitleSize: true,
+          title: that.oBundle.getText('Chinese')
+        }).addStyleClass('item-title')]
+      });
+
+      popOver.addContent(languageList);
+
+      var oButton = oEvent.getSource();
+      jQuery.sap.delayedCall(0, this, function() {
+        popOver.openBy(oButton);
+      });
+    },
+
+    /**
+     * reset buffer
+     */
+    resetBuffer: function() {
+      sap.ui.getCore().byId("selectNetworkBtns").setSelectedButton(sap.ui.getCore()
+        .byId("nBtn"));
+      this._batAddItems = [
+        [],
+        []
+      ];
+      this._selectedItems = [];
+      this._kpiType = '0';
+    },
+
+    /**
+     * handle back press in add kpi list dialog
+     * @param  {oEvent} oEvent
+     */
+    handleBackPress: function(oEvent) {
+      var oBundle = this.oBundle;
+      var currentContent = sap.ui.getCore().byId("idaddKPIHeadText").getText();
+      if (currentContent == oBundle.getText('addKPI')) {
+        sap.ui.getCore().byId("selectKPIDialog").removeAllContent();
+        sap.ui.getCore().byId("selectKPIDialog").addContent(sap.ui.getCore()
+          .byId("kpiComponentList"));
+        sap.ui.getCore().byId("idaddKPICancelButton").setWidth("100%");
+        sap.ui.getCore().byId("idaddKPIOKButton").setVisible(false);
+        sap.ui.getCore().byId("addKPIbackButton").setVisible(false);
+      } else if (currentContent == oBundle.getText('addKPITo')) {
+        sap.ui.getCore().byId("selectKPIDialog").removeAllContent();
+        sap.ui.getCore().byId("selectKPIDialog").addContent(sap.ui.getCore()
+          .byId("kpiDetailsList"));
+        sap.ui.getCore().byId("idaddKPIHeadText").setText(oBundle.getText(
+          'addKPI'));
+      }
+      sap.ui.getCore().byId("kpi-search-field-1").setVisible(true);
+      sap.ui.getCore().byId("kpi-search-field-2").setValue('');
+      sap.ui.getCore().byId("kpi-search-field-2").setVisible(false);
+    },
+
+    // TODO: Optional functionc implenment later or phase 2
+    /***************************************************************************
+     * Search in dialog(Optional function)
+     **************************************************************************/
+    onSearch: function(oEvent) {
+
+    },
+
+    // TODO: Optional functionc implenment later or phase 2
+    /***************************************************************************
+     * Search function in Page(will be delete)
+     **************************************************************************/
+    handleSearch: function(oEvent) {
+      var sValue = oEvent.getParameter("value");
+      var oFilter = new sap.ui.model.Filter("Name", sap.ui.model.FilterOperator
+        .Contains, sValue);
+      var oBinding = oEvent.getSource().getBinding("items");
+      oBinding.filter([oFilter]);
+    },
+
+    /***************************************************************************
+     * closed warning dialog
+     **************************************************************************/
+    onInformationDlgClose: function() {
+      this.informationMsgDlg.close();
+    },
+    /***************************************************************************
+     * Switch Network and Terminal
+     **************************************************************************/
+    /**
+     * call this function when the network buttons in the kpi add list is clicked
+     * @param  {oEvent} oEvent
+     */
+    nBtnPress: function(oEvent) {
+      var i = 0;
+      if (this._kpiType === '0') {
+        // do nothing
+      } else {
+        if (this._selectedItems.length > 0)
+          for (i = 0; i < this._selectedItems.length; i++) {
+            this._batAddItems[1].push(this._selectedItems[i]);
+          }
+        this._selectedItems = [];
+        this._kpiType = '0';
+        sap.ui.getCore().byId("kpiDetailsList").bindItems("/" + this._addKPI
+          .selected_ComponentIndex + '/KEY_COLLECTION_' + this._kpiType,
+          new sap.m.StandardListItem({
+            title: {
+              path: 'KPI_KEY',
+              formatter: huawei.cmes.util.commons.Formatters.addKPIFormatter
+            },
+            tooltip: {
+              path: 'KPI_KEY',
+              formatter: huawei.cmes.util.commons.Formatters.addKPIFormatter
+            },
+            type: sap.m.ListType.Active,
+            selected: false
+              // this.handleKPIListPress(this)
+          }), this._oModel.oData);
+
+        // recover selection status
+        if (this._batAddItems[0].length > 0) {
+          var items = sap.ui.getCore().byId('kpiDetailsList').getItems();
+
+          for (i = 0; i < this._batAddItems[0].length; i++) {
+            var paths = this._batAddItems[0][i].split('/');
+            for (var j = 0; j < items.length; j++) {
+              var kpiKey = this._oModel.oData[paths[1]][paths[2]][paths[3]].KPI_KEY;
+              kpiKey = this.oBundle.getText(kpiKey + "_FULL_NAME");
+              if (kpiKey === items[j].getTitle())
+                sap.ui.getCore().byId('kpiDetailsList').setSelectedItem(
+                  items[j], true);
+              continue;
+            }
+          }
+        }
+
+      }
+    },
+    /**
+     * call this function when the terminal buttons in the kpi add list is clicked
+     * @param  {oEvent} oEvent
+     */
+    tBtnPress: function(oEvent) {
+      var i = 0;
+      if (this._kpiType === '1') {
+        // do nothing
+      } else {
+        if (this._selectedItems.length > 0)
+          for (i = 0; i < this._selectedItems.length; i++) {
+            this._batAddItems[0].push(this._selectedItems[i]);
+          }
+        this._selectedItems = [];
+        this._kpiType = '1';
+        sap.ui.getCore().byId("kpiDetailsList").bindItems("/" + this._addKPI
+          .selected_ComponentIndex + '/KEY_COLLECTION_' + this._kpiType,
+          new sap.m.StandardListItem({
+            title: {
+              path: 'KPI_KEY',
+              formatter: huawei.cmes.util.commons.Formatters.addKPIFormatter
+            },
+            tooltip: {
+              path: 'KPI_KEY',
+              formatter: huawei.cmes.util.commons.Formatters.addKPIFormatter
+            },
+            type: sap.m.ListType.Active,
+            selected: false
+              // this.handleKPIListPress(this)
+          }), this._oModel.oData);
+
+
+        // recover selection status
+        if (this._batAddItems[1].length > 0) {
+          var items = sap.ui.getCore().byId('kpiDetailsList').getItems();
+
+          for (i = 0; i < this._batAddItems[1].length; i++) {
+            var paths = this._batAddItems[1][i].split('/');
+            for (var j = 0; j < items.length; j++) {
+              var kpiKey = this._oModel.oData[paths[1]][paths[2]][paths[3]].KPI_KEY;
+              kpiKey = this.oBundle.getText(kpiKey + "_FULL_NAME");
+              if (kpiKey === items[j].getTitle())
+                sap.ui.getCore().byId('kpiDetailsList').setSelectedItem(
+                  items[j], true);
+              continue;
+            }
+          }
+        }
+
+      }
+
+    },
+
+    onPressNavigator: function() {
+      // alert('12312');
+    },
+    /***************************************************************************
+     * Private Method
+     **************************************************************************/
+    createIndex: function(Object, Key) {
+      if (Object.length === 0 || Object.length === undefined || Object === undefined)
+        return "001";
+      var orginal_Index = Object[Object.length - 1][Key];
+      return huawei.cmes.util.commons.Formatters.leftFillGap(3, parseFloat(
+        orginal_Index) + 1, "0");
+    },
+    /**
+     * Get selected path
+     * @param  {Object} Object
+     * @return {String} path|''
+     */
+    getSelectedPath: function(Object) {
+
+      var splitArr = Object.split('/');
+      if (splitArr.length !== 0)
+        return splitArr[splitArr.length - 1];
+      return '';
+    },
+    /**
+     * Get selected index of a list
+     * @param  {sap.m.list} list
+     * @return {sap.m.list}
+     */
+    getSelectedIndex: function(list) {
+      var items = list.getItems();
+      var selectedIndex = 0;
+      items.forEach(function(item, index) {
+        if (item.getSelected()) {
+          selectedIndex = index;
+        }
+      });
+      return selectedIndex;
+    },
+
+    // test data=================================================
+    // Not in use any more
+    testData: [{
+      componentName: '终端质量',
+      data: [{
+        actualValue: '430',
+        targetValue: '',
+        kpiName: '直通率'
+      }, {
+        actualValue: '94',
+        targetValue: '%',
+        kpiName: '批量质量问题'
+      }, {
+        actualValue: '80',
+        targetValue: '100',
+        kpiName: '客户投诉'
+      }, {
+        actualValue: '2',
+        targetValue: '10',
+        kpiName: '终端FFR'
+      }]
+    }, {
+      componentName: '终端交付',
+      data: [{
+        actualValue: '430',
+        targetValue: '',
+        kpiName: '入库量'
+      }, {
+        actualValue: '94',
+        targetValue: '%',
+        kpiName: '发货量'
+      }, {
+        actualValue: '80',
+        targetValue: '100',
+        kpiName: '及时完成率'
+      }, {
+        actualValue: '430',
+        targetValue: '10',
+        kpiName: '加工周期'
+      }]
+    }, {
+      componentName: '泛网络质量',
+      data: [{
+        actualValue: '430',
+        targetValue: '',
+        kpiName: '直通率'
+      }, {
+        actualValue: '94',
+        targetValue: '%',
+        kpiName: '批量质量问题'
+      }, {
+        actualValue: '80',
+        targetValue: '100',
+        kpiName: '客户投诉'
+      }, {
+        actualValue: '430',
+        targetValue: '10',
+        kpiName: '单板返还率'
+      }]
+    }, {
+      componentName: '泛网络交付',
+      data: [{
+        actualValue: '430',
+        targetValue: '',
+        kpiName: '单板产出'
+      }, {
+        actualValue: '94',
+        targetValue: '%',
+        kpiName: '整机产出'
+      }, {
+        actualValue: '80',
+        targetValue: '100',
+        kpiName: '及时完成率'
+      }, {
+        actualValue: '430',
+        targetValue: '10',
+        kpiName: '加工周期'
+      }]
+    }]
+
+  });
+})();
