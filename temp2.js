@@ -49,12 +49,19 @@
     ajaxGet: HTTP.ajaxGet,
     
 
+    /**
+     * _initCompositeSupport - set properties to initialize the KPI chart class
+     * @param  {object} properties - the properties for KPI chart
+     * @return {none}
+     */
     _initCompositeSupport: function (properties) {
 
+      //set language
       this.languageSetting();
       
       this._globalPeriodLegend="";
 
+      //set query url
       var sFilter,sPeriod;
       sFilter = "?KPI_KEY=" + properties.title;
       sPeriod = properties.period;
@@ -88,10 +95,14 @@
 
     },
 
+    /**
+     * init - initial controller
+     * @return {none}
+     */
     init: function () {
 
       this.sParentId = "";
-
+      //set chart colors
       this.sColorss = ["#FFD3A7", "#99D0B0", "#87CEFA"];
 
       //save all dimension charts of current KPI chart
@@ -132,7 +143,7 @@
     },
     
     /**
-     * Render this page
+     * renderer - Render this page
      * @param oRm
      * @param oControl
      */
@@ -148,13 +159,18 @@
     },
 
     /**
-     * getSubDimChart generate dimension char
-     * @param  {Integer} dimIndex - the index of dimension charts
+     * getSubDimChart generate dimension chart
+     * @param  {Integer} dimIndex - the index of dimension chart that need to generate
+     * @return {sap.viz.ui5.Line} - the dimension chart
      */
     getSubDimChart: function (dimIndex) {
-
+      //create dimension chart
       var subDimChart = new sap.viz.ui5.Line({
         title: new sap.viz.ui5.types.Title({
+          //set the title of chart
+          //this.dimNames - array - save all dimension names
+          //this.getCategory() - 0:Network, 1:Terminal 
+          //dimIndex - teh index of dimension chart that need to generate
           text: this.dimNames[this.getCategory()][dimIndex]
         }),
         width: "100%",
@@ -168,12 +184,14 @@
 
       //oFilters[0] = new sap.ui.model.Filter("DIMENSION",sap.ui.model.FilterOperator.EQ,(dimIndex+1).toString());
       //oFilters[0] = new sap.ui.model.Filter("KPI_TAG",sap.ui.model.FilterOperator.EQ,"0");
+      //set dataset of dimension chart
       var oDataset = new sap.viz.ui5.data.FlattenedDataset({
         dimensions: [{
           axis: 1,
           name: this.oBundle.getText("chart_period"),
           value: {
             path: 'PERIOD',
+            //show value in proper formater
             formatter: function (value) {
               value = huawei.cmes.util.commons.Formatters.chartPeriodFormatter(
                 value, "");
@@ -186,18 +204,22 @@
           value: "{DIMENSION}"
         }],
 
+        //set measures of dimension chart
         measures: [{
           name: this.oBundle.getText("CurrentMonthValue"),
           value: "{KPI_VALUE}"
         }],
         data: {
           path: "/",
+          //set filters
           filters: oFilters,
           sort: "{PERIOD}"
         }
       });
 
+      //set dateset of dimension chart
       subDimChart.setDataset(oDataset);
+      //generate two legend positions
       var lengendPosition = new sap.viz.ui5.types.Legend({
         layout: {
           position: sap.viz.ui5.types.legend.Common_position.bottom
@@ -210,6 +232,7 @@
       });
       subDimChart.setLegendGroup(lengendPosition, lengendPosition1);
 
+      //get plot area
       var oLinePlotArea = subDimChart.getPlotArea();
       //huawei.cmes.util.chart.Helper.setChartAttributes(oLinePlotArea, false);      
       oLinePlotArea.setColorPalette(this.sColors);
@@ -217,17 +240,20 @@
       //set marker size
       oLinePlotArea.getMarker().setSize(4);
 
+      //set model for dimension chart
       var oModel = new sap.ui.model.json.JSONModel();
       subDimChart.setModel(oModel);
 
+      //save dimension chart in array this.dimCharts
       this.dimCharts[dimIndex] = subDimChart;
       return subDimChart;
     },
 
     /**
-     * getDefectChart generate defect char
+     * getDefectChart generate defect chart
      * @param  {String} defectType - the type of defect: phenomenon, cause
      * @param  {String} chartType - the chart type: pie, dual, bar
+     * @return {vizchart} - defect chart
      */
     getDefectChart: function (defectType, chartType) {
       var height = "280px";
@@ -235,7 +261,9 @@
       var oDataset = null;
       var defectTypes = ["defect_phenomenon", "defect_causes"];
 
+      //set corresponding dataset for defect chart
       switch (chartType) {
+        //set dataset for bar chart
       case "bar":
         oDataset = new sap.viz.ui5.data.FlattenedDataset({
           dimensions: [{
@@ -262,6 +290,7 @@
           selectData: this.onSelectData
         });
         break;
+        //set dataset for pie chart
       case "pie":
         oDataset = new sap.viz.ui5.data.FlattenedDataset({
           dimensions: [{
@@ -285,6 +314,7 @@
           selectData: this.onSelectData
         });
         break;
+        //set dataset for dual_combination
       case "dual_combination":
         defectChart = new sap.viz.ui5.DualCombination({
           width: "100%",
@@ -317,7 +347,7 @@
 
       }
 
-
+      //set dataset for defect chart
       defectChart.setDataset(oDataset);
       var lengendPosition = new sap.viz.ui5.types.Legend({
         layout: {
@@ -325,21 +355,22 @@
         }
       });
 
+      //set position of legend group
       defectChart.setLegendGroup(lengendPosition);
       var oLinePlotArea = defectChart.getPlotArea();
       //huawei.cmes.util.chart.Helper.setChartAttributes(oLinePlotArea, false);     
       oLinePlotArea.setColorPalette(this.sColors);
 
+      //set model of defect chart
       var defectModel = new sap.ui.model.json.JSONModel();
       defectChart.setModel(defectModel);
 
       return defectChart;
-
     },
 
     /**
-     * Set chart color
-     * @param oControl
+     * _setChartColor - Set chart color
+     * @param oControl - the controller
      */
     _setChartColor: function (oControl) {
       if (oControl.getColor() && oControl.getColor().length > 0) oControl.oLinePlotArea
@@ -347,7 +378,7 @@
     },
 
     /**
-     * createChart create KPI char
+     * createChart - create KPI char
      */
     createChart: function (aa) {
       this._KPIChart = new sap.viz.ui5.Line({
@@ -356,9 +387,8 @@
         selectData: this.onSelectData
       }).addStyleClass('kpi-chart-middle');
 
-
       this.addAggregation("content", this._KPIChart);
-
+      //set dataset of KPI chart
       this._oDataset = {
         dimensions: [{
           axis: 1,
@@ -373,6 +403,7 @@
           }
         }],
 
+        //set measures of KPI chart
         measures: [{
           //name: this.oBundle.getText("ActualValue"),
           name: this.oBundle.getText(aa),
@@ -389,21 +420,27 @@
         }
       };
 
+      //generate dataset for KPI chart
       var oDataset = new sap.viz.ui5.data.FlattenedDataset(this._oDataset);
-
+      //set dataset for KPI chart
       this._KPIChart.setDataset(oDataset);
 
+      //generate legend position
       var lengendPosition = new sap.viz.ui5.types.Legend({
         layout: {
           position: sap.viz.ui5.types.legend.Common_position.bottom
         }
       });
+      //set legend position for legend group of KPI chart
       this._KPIChart.setLegendGroup(lengendPosition);
 
+      //get plot area of KPI chart
       this.oLinePlotArea = this._KPIChart.getPlotArea();
       // huawei.cmes.util.chart.Helper.setChartAttributes(this.oLinePlotArea, false);
 
+      //set color for plot area of KPI chart
       this.oLinePlotArea.setColorPalette(this.sColors);
+      //attach deselect data on KPI chart
       this._KPIChart.attachDeselectData(CHART_HELPER.onDeSelectRerender);
       //set marker size
       this.oLinePlotArea.getMarker().setSize(4);
@@ -411,11 +448,12 @@
 
 
     /**
-     * Call this function when the points and legends are clicked in Chart
+     * onSelectData - Call this function when the points and legends are clicked in Chart
      * Exclusive function for dimension Select Event
-     * @param {oEvent} oEvent
+     * @param {oEvent} oEvent - ui5 select data event on KPI chart
      */
     onSelectData: function (oEvent) {
+      //get dom reference of KPI chart
       var chart = oEvent.getSource().getDomRef();
       var chartId = chart.id;
 
