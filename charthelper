@@ -1,0 +1,798 @@
+(function () {
+  "use strict";
+
+  jQuery.sap.declare("huawei.cmes.util.chart.Helper");
+  jQuery.sap.require("huawei.cmes.util.commons.Helper");
+
+  /** @type {function} global varables */
+  var HELPER = huawei.cmes.util.commons.Helper;
+
+  huawei.cmes.util.chart.Helper = {
+    /**
+     * Not show no data in chart when no data in chart model
+     */
+    deleteNoDataWord: function () {
+      $('.sapVizNoDataDefault').remove();
+    },
+
+    /**
+     * Used in chart, when the points or lengends are clicked on page
+     * @param  {oEvent} oEvent
+     */
+    onSelectData: function (oEvent) {
+      //Get the path of selected elements
+      var ctxPath = oEvent.getParameter("data")[0].data[0].ctx.path;
+      //Get the index of the selected element in chart
+      var dii_a2 = ctxPath.dii_a2;
+      //Get the index of the legend clicked on
+      var currentLegendIndex = ctxPath.mi;
+      if (dii_a2 !== 0) {
+        currentLegendIndex = dii_a2;
+      }
+      //Get the dom of the chart
+      var chart = oEvent.getSource().getDomRef();
+      //Get the id of the chart
+      var chartId = chart.id;
+
+      //get the svg lines of the chart
+      var svgLines = $(chart).find('.v-markers>.v-axis1>.v-marker');
+      //Get the number of the svg lines
+      var lineLength = svgLines.length;
+      //Get the parent node of the chart
+      var parentNode = svgLines.parent();
+
+      //If chartSelect Name Space is undefined
+      if (sap.chartSelect === undefined) {
+        sap.chartSelect = {};
+      }
+      //Resize the window, the chart info will be restored
+      $(window).resize(function () {
+        sap.chartSelect = {};
+      });
+
+      //If namespace of this chart is undefined
+      if (sap.chartSelect[chartId] === undefined) {
+        sap.chartSelect[chartId] = {
+          seq: {}
+        };
+        //Record the index of the original lines
+        svgLines.each(function (svgLineIndex) {
+          sap.chartSelect[chartId].seq[svgLineIndex] = svgLineIndex;
+        });
+      }
+
+      //Get the seq object
+      var sapChartSeq = sap.chartSelect[chartId].seq;
+      //Get current sequence
+      var currentLineIndex = sapChartSeq[currentLegendIndex];
+      //
+      //Rearrage the new sequences of the svg lines in html
+      //If you click on the legend
+      //the correponding line of the legend will be moved to on the top on the chart in html
+      function reArrange(currentSeq, legendIndex) {
+        //        console.log('currentSeq, legendIndex', currentSeq, legendIndex);
+        var tempSeq = currentSeq;
+        for (var seqIndex in tempSeq) {
+          if (tempSeq[seqIndex] > tempSeq[legendIndex]) {
+            tempSeq[seqIndex] = tempSeq[seqIndex] - 1;
+          }
+        }
+        tempSeq[legendIndex] = lineLength - 1;
+        //        console.log('tempSeq', tempSeq);
+        return tempSeq;
+      };
+      //get the new sequence
+      sap.chartSelect[chartId].seq = reArrange(sapChartSeq,
+        currentLegendIndex);
+
+      //Remove the original html node of all svgLines
+      var targetLine = svgLines[currentLineIndex];
+      parentNode.children().remove();
+      //Push the target line to the top
+      svgLines.splice(currentLineIndex, 1);
+      svgLines.push(targetLine);
+      //the correponding line of the legend will be moved to on the top on the chart in html
+      //Append the new lines on html
+      parentNode.append(svgLines);
+    },
+
+    /**
+     * Remove top label on Y
+     * @param  {String} chardIdOrClass
+     */
+    removeTopLabelOnY: function (chardIdOrClass) {
+      //Get the selector of Jquery
+      var elementsIdOrClass = '#' + chardIdOrClass;
+      //If it is class, add . in front of the classname
+      if ($(elementsIdOrClass).length === 0) {
+        elementsIdOrClass = '.' + chardIdOrClass;
+      }
+      //Give 0.1 second for broser to response
+      setTimeout(function () {
+        //Delete the target content
+        $(elementsIdOrClass).each(function (index, e) {
+          var chartLabel = $(e).find('.v-m-yAxis .viz-axis-label text')[0];
+          var chartDash = $(e).find('.v-m-yAxis .v-valueaxisline')[0];
+          if (chartDash !== undefined && chartDash !== undefined) {
+            //Delete the target content
+            if (chartLabel.textContent !== '') {
+              chartLabel.textContent = '';
+              $(chartDash).remove();
+            }
+          }
+        });
+
+      }, 100);
+    },
+
+    /**
+     * When deselect the chart
+     * @param  {oEvent} oEvent
+     */
+    onDeSelectRerender: function (oEvent) {
+      //Reload lines in chart | not reload data just redraw the lines
+      this.rerender();
+      //Get Chart
+      var chart = oEvent.getSource().getDomRef();
+      var chartId = chart.id;
+      //Set the select history to undefined
+      if (sap.chartSelect !== undefined) {
+        sap.chartSelect[chartId] = undefined;
+      }
+      //Remove the board in font of points | avoid some half points on the edge of chart
+      $('.v-clippath').remove();
+    },
+
+    /**
+     * Initialize tooltip
+     */
+    initTooltip: function () {
+      //Call function when hover on '.v-row' elements
+      $('.v-row').hover(function (evt) {
+        //Record the evt, only one sap.evt exist
+        sap.evt = evt;
+        //Get title
+        var title = evt.currentTarget.querySelector('title');
+        //Get title
+        var text = evt.currentTarget.querySelector('text');
+        //Initialize tooltip text
+        var showtext = '';
+
+        //Get the x and y position
+        var posotionX = evt.clientX;
+        var posotionY = evt.clientY - 30;
+
+        //Get the content and get the html string to show
+        if (title) {
+          //If title exist
+          showtext +=
+            '<span class="tooltip" style="left:' +
+            posotionX + 'px;top:' + posotionY + 'px">' + title.textContent +
+            '</span>';
+        } else {
+          //If title not exist check whether text exists
+          if (text) {
+            showtext +=
+              '<span class="tooltip" style="left:' +
+              posotionX + 'px;top:' + posotionY + 'px">' + text.textContent +
+              '</span>';
+          }
+        }
+        //Append the html string
+        $('body').append(showtext);
+
+      }, function () {
+        //After hover, remove the tooltip
+        $('.tooltip').remove();
+      });
+
+      //When scroll, remove the tooltip
+      $(window).scroll(function () {
+        $('.tooltip').remove();
+      });
+    }
+
+  };
+
+  /**
+   * Get unit of the distance
+   * @param  {String} distance
+   * @return {Int} unit
+   */
+  var getUnit = function (distance) {
+    
+    var distanceUnitInt = parseInt(distance / 10);
+    var intLength = distanceUnitInt.toString().length;
+
+    if (intLength >= 3) {
+      var maxDigit = distanceUnitInt.toString().length - 2;
+
+      var expo = Math.pow(10, maxDigit);
+      distanceUnitInt = parseInt(distanceUnitInt / expo);
+
+      if (distanceUnitInt % 5 >= 3) {
+        distanceUnitInt = parseInt(distanceUnitInt / 5) * 5 + 5;
+      } else {
+        distanceUnitInt = parseInt(distanceUnitInt / 5) * 5;
+      }
+      distanceUnitInt *= expo;
+
+      return distanceUnitInt;
+
+    } else if (intLength === 2) {
+
+      if (distanceUnitInt % 5 >= 3) {
+        distanceUnitInt = parseInt(distanceUnitInt / 5) * 5 + 5;
+      } else {
+        distanceUnitInt = parseInt(distanceUnitInt / 5) * 5;
+      }
+      return distanceUnitInt;
+
+    } else if (intLength = 1 && distance >= 5) {
+
+      if (distanceUnitInt % 5 >= 3) {
+        distanceUnitInt = parseInt(distanceUnitInt / 5) * 5 + 5;
+      } else {
+        distanceUnitInt = distanceUnitInt + 1;
+      }
+
+      return distanceUnitInt;
+
+    } else if (distanceUnitInt === 0 && distance < 5 && distance > 2) {
+
+      distanceUnitInt = 0.5;
+
+      return distanceUnitInt;
+
+    } else if (distance < 2 || distance === 2) {
+      distanceUnitInt = 0.2;
+      return distanceUnitInt;
+    }
+
+  };
+
+  /**
+   * Set YAxis (and YAxis2) Scale for Charts, including Dual Charts
+   *
+   * @param oChart
+   *            reference to the chart
+   * @param nMinValueYAxis
+   *            minimum value for the Axis scale of YAxis
+   * @param nMaxValueYAxis
+   *            maximum value for the Axis scale of YAxis
+   * @param fixMin {boolean}
+   *            the Y min value is fixed
+   * @param fixMax {boolean}
+   *            the Y max value is fixed
+   */
+  function setChartYAxisScale(oChart, nMinValueYAxis, nMaxValueYAxis,
+    nMinValueYAxis2, nMaxValueYAxis2, fixMin, fixMax) {
+    //	console.log(oChart);
+    if (!oChart || !(oChart.getYAxis)) {
+      // if this is the wrong object
+      return;
+    }
+
+    var oYAxis = oChart.getYAxis();
+    var distance = nMaxValueYAxis - nMinValueYAxis;
+
+    var distanceUnit = getUnit(distance);
+
+    var minYValue = parseInt(nMinValueYAxis / distanceUnit) * distanceUnit;
+    var maxYValue = parseInt(nMaxValueYAxis / distanceUnit) * distanceUnit +
+      distanceUnit;
+
+
+    if (minYValue === nMinValueYAxis) {
+      minYValue -= distanceUnit;
+    }
+    if (minYValue < 0) {
+      minYValue = 0;
+    }
+
+    var isPercentage = false;
+    if (oChart.getModel().getData()[0] !== undefined) {
+      if (oChart.getModel().getData()[0].UNIT === '%') {
+        isPercentage = true;
+      };
+    }
+
+    //Whether the chart is a percentage chart
+    if (isPercentage) {
+      maxYValue = 100;
+    }
+
+    //    console.log(oChart.getId(), nMaxValueYAxis);
+
+    minYValue = Math.floor(minYValue);
+    maxYValue = Math.ceil(maxYValue);
+
+    var oYAxisScale = new sap.viz.ui5.types.Axis_scale({
+      minValue: fixMin ? nMinValueYAxis : minYValue,
+      maxValue: fixMax ? nMaxValueYAxis : maxYValue
+    });
+
+    // use setFixedRange() to make the custom Scale work
+    oYAxis.setScale(oYAxisScale.setFixedRange(true));
+    oChart.setYAxis(oYAxis);
+
+    if (oChart.getYAxis2) {
+      // if the chart has YAxis2
+      var oYAxis2 = oChart.getYAxis2();
+
+      var oYAxisScale2 = new sap.viz.ui5.types.Axis_scale({
+        minValue: +nMinValueYAxis2,
+        maxValue: +nMaxValueYAxis2
+      });
+      oYAxis2.setScale(oYAxisScale2.setFixedRange(true));
+      oChart.setYAxis2(oYAxis2);
+    }
+  };
+  
+  function setChartPercentageYAxisScale(oChart) {
+    var oYAxis = oChart.getYAxis();
+
+    var oYAxisScale = new sap.viz.ui5.types.Axis_scale({
+      minValue: 0,
+      maxValue: 100
+    });
+
+    // use setFixedRange() to make the custom Scale work
+    oYAxis.setScale(oYAxisScale.setFixedRange(true));
+    oChart.setYAxis(oYAxis);
+
+  };
+  
+  function setChartPercentageYAxis2Scale(oChart) {
+	    var oYAxis = oChart.getYAxis();
+
+	    var oYAxisScale = new sap.viz.ui5.types.Axis_scale({
+	      minValue: 0,
+	      maxValue: 100
+	    });
+
+	    // use setFixedRange() to make the custom Scale work
+	    oYAxis.setScale(oYAxisScale.setFixedRange(true));
+	    oChart.setYAxis2(oYAxis);
+
+	  };
+
+
+  function setYAxisScale(oChart, min, max) {
+    var oYAxis = oChart.getYAxis();
+
+    var oYAxisScale = new sap.viz.ui5.types.Axis_scale({
+      minValue: min,
+      maxValue: max
+    });
+
+    // use setFixedRange() to make the custom Scale work
+    oYAxis.setScale(oYAxisScale.setFixedRange(true));
+    oChart.setYAxis(oYAxis);
+
+  };
+
+
+  huawei.cmes.util.chart.Helper.setChartYAxisScale = setChartYAxisScale;
+  huawei.cmes.util.chart.Helper.setYAxisScale = setYAxisScale;
+  huawei.cmes.util.chart.Helper.setChartPercentageYAxisScale = setChartPercentageYAxisScale;
+  huawei.cmes.util.chart.Helper.setChartPercentageYAxis2Scale = setChartPercentageYAxis2Scale;
+  
+  /**
+   * Functionality: Set the line or bar color of the given chart and index
+   * Parameters : 1. oChart : bar or line 2. nPrimaryOrSecondary : a number
+   * indicating which axis to set, 1 for Yxis1 and other for Yxis2 3. nIndex :
+   * a number indicating which line or bar to set 4. sColor : a string
+   * indicating the color
+   */
+  function setDualChartColor(oChart, nPrimaryOrSecondary, nIndex, sColor) {
+    var oPlotArea = oChart.getPlotArea(); // get the plot area
+
+    if (nPrimaryOrSecondary === 1) { // 1 for primary
+      var sPrimaryColor = oPlotArea.getPrimaryValuesColorPalette();
+      sPrimaryColor[nIndex] = sColor; // set the second color of the
+      // primary color palette to sColor
+      oPlotArea.setPrimaryValuesColorPalette(sPrimaryColor);
+    } else { // else for secondary
+      var sSecondaryColor = oPlotArea.getSecondaryValuesColorPalette();
+      sSecondaryColor[nIndex] = sColor; // set the second color of the
+      // primary color palette to
+      // sColor
+      oPlotArea.setSecondaryValuesColorPalette(sSecondaryColor);
+    }
+
+    //oChart.setBackground(new sap.viz.ui5.types.Background({visible:false,color:'#FFFFFF', direction :sap.viz.ui5.types.Background_direction.horizontal }));
+  };
+
+  huawei.cmes.util.chart.Helper.setDualChartColor = setDualChartColor;
+
+
+  huawei.cmes.util.chart.Helper.setStackedColumnChartColor = setStackedColumnChartColor;
+  /**
+   * Functionality: Set the line or bar color of the given chart and index
+   * Parameters : 1. oChart : bar or line 2. nPrimaryOrSecondary : a number
+   * indicating which axis to set, 1 for Yxis1 and other for Yxis2 3. nIndex :
+   * a number indicating which line or bar to set 4. sColor : a string
+   * indicating the color
+   */
+  function setStackedColumnChartColor(oChart, nIndex, sColor) {
+    var oPlotArea = oChart.getPlotArea(); // get the plot area
+
+    var oColor = oPlotArea.getColorPalette();
+    oColor[nIndex] = sColor; // set the second color of the
+    // primary color palette to sColor
+    oPlotArea.setColorPalette(oColor);
+  };
+
+
+  huawei.cmes.util.chart.Helper.setChartAttributes = setChartAttributes;
+  /**
+   * Functionality: Set the visibility of the marker of the given line
+   * Parameters : 1. oLine : Line or DualLine 2. bVisible : boolean type
+   * indicating the visibility of the marker
+   */
+  function setChartAttributes(oLine, bVisable) {
+    var oMarker = oLine.getMarker();
+    oMarker.setVisible(bVisable);
+
+    oLine.setWidth(3);
+  };
+
+
+  huawei.cmes.util.chart.Helper.adjustChartYAxis = adjustChartYAxis;
+  /**
+   * Functionality: Set the yaxis range based on the data
+   * Parameters : 1. oChart 2. sortBys : the fields sent from back end used to sort by
+   * e.g. ['P_VALUE','C_VALUE']
+   */
+  function adjustChartYAxis(oChart) {
+
+    /*
+     * Get max|min kpi value of the array
+     * */
+    var getMValue = function (valueArry, key) {
+      var max = null,
+        min = null;
+      for (var i = 0; i < valueArry.length; i++) {
+        if (valueArry[i][key] === undefined) {
+          continue;
+        }
+        if (max === null) {
+          max = parseFloat(valueArry[i][key]);
+        }
+        if (max !== null && max < parseFloat(valueArry[i][key])) {
+          max = parseFloat(valueArry[i][key]);
+        }
+        if (min === null) {
+          min = parseFloat(valueArry[i][key]);
+        }
+        if (min !== null && min > parseFloat(valueArry[i][key])) {
+          min = parseFloat(valueArry[i][key]);
+        }
+
+      }
+
+      return {
+        MAX: max,
+        MIN: min
+      };
+
+    };
+
+    var oData = oChart.getModel().oData;
+    if (oData === undefined || oData.length === 0 || oData.length === undefined) {
+      return;
+    } else if (oData.d !== undefined) {
+      oData = oData.d.results;
+      if (oData.length === 0 || oData.length === undefined) {
+        return;
+      }
+    }
+    oData = huawei.cmes.util.commons.Helper.deepClone(oData);
+
+    var measures = oChart.getDataset().getMeasures();
+    var sortBys = [];
+
+    for (var i = 0; i < measures.length; i++) {
+      var group = measures[i].getGroup() - 1;
+      if (sortBys[group] === undefined) sortBys[group] = [];
+      sortBys[group].push(measures[i].mBindingInfos.value.binding.sPath);
+    }
+
+    var maxs = [],
+      mins = [];
+    var max, min;
+    var tmpMValue = {};
+
+    for (var i = 0; i < sortBys.length; i++) {
+      var sortBy = sortBys[i];
+
+      max = getMValue(oData, sortBy[0]).MAX;
+      min = getMValue(oData, sortBy[0]).MIN;
+      tmpMValue = {};
+      for (var j = 0; j < sortBy.length; j++) {
+        tmpMValue = getMValue(oData, sortBy[j]);
+        //add tmpMValue.MAX and tmpMValue.MIN !==null conditions,void null to replace min/max value by 00315717
+        if (max < tmpMValue.MAX && tmpMValue.MAX !==null) {  
+          max = tmpMValue.MAX;
+        }
+        if (min > tmpMValue.MIN && tmpMValue.MIN !==null) {
+          min = tmpMValue.MIN;
+        }
+      }
+
+      maxs[i] = max;
+      mins[i] = min;
+    }
+
+    if (sortBys.length > 1) {
+      mins[0] = Math.floor(mins[0]);
+      maxs[0] = Math.ceil(maxs[0]) + 1;
+      mins[1] = Math.floor(mins[1]);
+      maxs[1] = Math.ceil(maxs[1] + 1);
+      huawei.cmes.util.chart.Helper.setChartYAxisScale(oChart, mins[0], maxs[
+        0], mins[1], maxs[1]);
+    } else {
+      if (oData[0].UNIT !== undefined) {
+        if (oData[0].UNIT === "%") {
+          var distance = maxs[0] - mins[0];
+          var distanceUnit = getUnit(distance);
+          if (100 - maxs[0] < distanceUnit) {
+            maxs[0] = maxs[0] + distanceUnit;
+          }
+        }
+      }
+      mins[0] = Math.floor(mins[0]);
+      maxs[0] = Math.ceil(maxs[0]);
+
+      huawei.cmes.util.chart.Helper.setChartYAxisScale(oChart, mins[0],
+        maxs[0], '', '', false, false);
+
+    }
+
+  };
+
+
+  huawei.cmes.util.chart.Helper.getNewXAxis = getNewXAxis;
+
+  function getNewXAxis(period, start, end) {
+    var xAxis = [],
+      curDate;
+    start = new Date(start);
+    end = new Date(end);
+
+
+    Date.prototype.getWeekOfYear = function () {
+      var weekStart = 1;
+      weekStart = (weekStart || 1) - 0;
+      if (isNaN(weekStart) || weekStart > 7)
+        weekStart = 1;
+
+      var firstDate = new Date(this.getFullYear(), 0, 1);
+      var firstWeekDays = 7 - firstDate.getDay() + weekStart;
+      var dayOfYear = (((new Date(this.getFullYear(), this.getMonth(), this.getDate())) -
+        firstDate) / (24 * 3600 * 1000)) + 1;
+      var week = Math.ceil((dayOfYear - firstWeekDays) / 7) + 1;
+      return week;
+    };
+
+    switch (period) {
+    case 'DAY':
+      while (start.getDate() !== end.getDate()) {
+        curDate = start.getFullYear() + "-" + (start.getMonth() + 1) + "-" +
+          start.getDate();
+        xAxis.push(curDate);
+        start.setDate(start.getDate() + 1);
+      }
+      curDate = end.getFullYear() + "-" + (end.getMonth() + 1) + "-" + end.getDate();
+      xAxis.push(curDate);
+      break;
+
+    case 'YEAR':
+      while (start.getFullYear() !== end.getFullYear()) {
+        curDate = start.getFullYear().toString();
+        xAxis.push(curDate);
+        start.setFullYear(start.getFullYear() + 1);
+      }
+      curDate = end.getFullYear().toString();
+      xAxis.push(curDate);
+      break;
+
+    case 'MONTH':
+      var month;
+      while (start.getMonth() !== end.getMonth()) {
+        month = start.getMonth() + 1 > 9 ? start.getMonth() + 1 : "0" + (
+          start.getMonth() + 1);
+        curDate = start.getFullYear() + "-" + month;
+        xAxis.push(curDate);
+        HELPER.getNextMonth(start);
+      }
+      month = end.getMonth() + 1 > 9 ? end.getMonth() + 1 : "0" + (end.getMonth() +
+        1);
+      curDate = end.getFullYear() + "-" + month;
+      xAxis.push(curDate);
+      break;
+
+    case 'WEEK':
+      var sWeek = start.getWeekOfYear();
+      var eWeek = end.getWeekOfYear();
+      var week;
+      while (sWeek !== eWeek) {
+        week = start.getWeekOfYear();
+        if (week === 53) {
+          week = 1;
+          curDate = start.getFullYear() + 1 + "-" + week + "W";
+          start.setDate(start.getDate() + 7);
+          if (start.getWeekOfYear() !== week) {
+            start.setDate(start.getDate() - 7);
+          }
+        } else {
+          curDate = start.getFullYear() + "-" + week + "W";
+        }
+
+        xAxis.push(curDate);
+
+        start.setDate(start.getDate() + 7);
+        sWeek = start.getWeekOfYear();
+      }
+      curDate = end.getFullYear() + "-" + eWeek + "W";
+      xAxis.push(curDate);
+      break;
+
+    }
+
+    return xAxis;
+  };
+
+  /*  
+  huawei.cmes.util.chart.Helper.showDataLabel = showDataLabel;
+*/
+
+  huawei.cmes.util.chart.Helper.adjustChartPeriod = adjustChartPeriod;
+  /**
+   * Functionality: Set the xaxis range based on the date period
+   * Parameters :
+   * 1. period e.g. DAY,MONTH,YEAR,WEEK
+   * 2. start date/end date : yyyy-MM-dd
+   * 3. oChart: adjust the xaxis for oChart
+   */
+  function adjustChartPeriod(period, start, end, oChart, field) {
+    var oData = oChart.getModel().oData;
+    if (oData === undefined || oData.length === 0 || oData.length === undefined) {
+      return;
+    } else if (oData.d !== undefined) {
+      oData = oData.d.results;
+      if (oData.length === 0 || oData.length === undefined) {
+        return;
+      }
+    }
+    oData = huawei.cmes.util.commons.Helper.deepClone(oData);
+
+    var dimensions = oChart.getDataset().getDimensions();
+    var xaxisPath = dimensions[0].mBindingInfos.value.binding.sPath;
+
+    var xAxis = this.getNewXAxis(period, start, end);
+
+    var result = [],
+      added = [];
+
+    for (var i = 0; i < oData.length; i++) {
+      if (xAxis.length === 0) {
+        break;
+      }
+      if (added.indexOf(oData[i].PERIOD) < 0) {
+        if (oData[i][xaxisPath] !== xAxis[0]) {
+          var obj = {};
+          obj[xaxisPath] = xAxis[0];
+          obj[field] = oData[i][field];
+          if (oData[i]["UNIT"] !== undefined) {
+            obj["UNIT"] = oData[i]["UNIT"];
+          }
+          result.push(obj);
+          i--;
+        } else {
+          result.push(oData[i]);
+        }
+        added.push(xAxis[0]);
+        xAxis.shift();
+      } else {
+        result.push(oData[i]);
+      }
+    }
+
+    var lastChecked = i < oData.length ? i : i - 1;
+    while (xAxis.length !== 0) {
+      var obj = {};
+      obj[xaxisPath] = xAxis[0];
+      obj[field] = oData[lastChecked][field];
+      if (oData[lastChecked]["UNIT"] !== undefined) {
+        obj["UNIT"] = oData[lastChecked]["UNIT"];
+      }
+      result.push(obj);
+      xAxis.shift();
+    }
+
+    if (i < oData.length) {
+      var restData = oData.slice(i);
+      result = result.concat(restData);
+    }
+
+    oChart.getModel().setData(result);
+  };
+
+
+  //  huawei.cmes.util.chart.Helper.onSelectData = onSelectData;
+  //  /**
+  //   * Functionality: Set the xaxis range based on the date period
+  //   * Parameters :
+  //   * 1. period e.g. DAY,MONTH,YEAR,WEEK
+  //   * 2. start date/end date : yyyy-MM-dd
+  //   * 3. oChart: adjust the xaxis for oChart
+  //   */
+  //  function onSelectData(oEvent) {
+  //
+  //    var ctxPath = oEvent.getParameter("data")[0].data[0].ctx.path;
+  //    var dii_a2 = ctxPath.dii_a2;
+  //    var currentLegendIndex = ctxPath.mi;
+  //    if (dii_a2 !== 0) {
+  //      currentLegendIndex = dii_a2;
+  //    }
+  //    var chart = oEvent.getSource().getDomRef();
+  //    var chartId = chart.id;
+  //
+  //    var svgLines = $(chart).find('.v-markers>.v-axis1>.v-marker');
+  //    var lineLength = svgLines.length;
+  //    var parentNode = svgLines.parent();
+  //
+  //    //If chartSelect Name Space is undefined
+  //    if (sap.chartSelect === undefined) {
+  //      sap.chartSelect = {};
+  //    }
+  //    $(window).resize(function () {
+  //      sap.chartSelect = {};
+  //    });
+  //
+  //    //If namespace of this chart is undefined
+  //    if (sap.chartSelect[chartId] === undefined) {
+  //      sap.chartSelect[chartId] = {
+  //        seq: {}
+  //      };
+  //      svgLines.each(function (svgLineIndex) {
+  //        sap.chartSelect[chartId].seq[svgLineIndex] = svgLineIndex;
+  //      });
+  //    }
+  //
+  //    //Get the seq object
+  //    var sapChartSeq = sap.chartSelect[chartId].seq;
+  //
+  //    var currentLineIndex = sapChartSeq[currentLegendIndex];
+  //    //
+  //
+  //    function reArrange(currentSeq, legendIndex) {
+  //      console.log('currentSeq, legendIndex', currentSeq, legendIndex);
+  //      var tempSeq = currentSeq;
+  //      for (var seqIndex in tempSeq) {
+  //        if (tempSeq[seqIndex] > tempSeq[legendIndex]) {
+  //          tempSeq[seqIndex] = tempSeq[seqIndex] - 1;
+  //        }
+  //      }
+  //      tempSeq[legendIndex] = lineLength - 1;
+  //      console.log('tempSeq', tempSeq);
+  //      return tempSeq;
+  //    }
+  //
+  //    sap.chartSelect[chartId].seq = reArrange(sapChartSeq,
+  //      currentLegendIndex);
+  //
+  //    var targetLine = svgLines[currentLineIndex];
+  //    parentNode.children().remove();
+  //
+  //    svgLines.splice(currentLineIndex, 1);
+  //
+  //    svgLines.push(targetLine);
+  //    parentNode.append(svgLines);
+  //
+  //  };
+
+
+})();
