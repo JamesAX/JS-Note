@@ -273,23 +273,32 @@
       return;
     }
 
+    //get yaxis of oChart
     var oYAxis = oChart.getYAxis();
+    //get the value range
     var distance = nMaxValueYAxis - nMinValueYAxis;
 
+    //get granularity of the chart
     var distanceUnit = getUnit(distance);
 
+    //get miniumn y value
     var minYValue = parseInt(nMinValueYAxis / distanceUnit) * distanceUnit;
+    //get maxmum y value
     var maxYValue = parseInt(nMaxValueYAxis / distanceUnit) * distanceUnit +
       distanceUnit;
 
 
+    //if the input minimum y value is the actual minimum y value, lower the minimum y value by
+    //minus a unit to make the chart display more clear
     if (minYValue === nMinValueYAxis) {
       minYValue -= distanceUnit;
     }
+    //force the minimum value to 0 if the actual minimum value less than 0
     if (minYValue < 0) {
       minYValue = 0;
     }
 
+    //check whether the chart is in percentage mode
     var isPercentage = false;
     if (oChart.getModel().getData()[0] !== undefined) {
       if (oChart.getModel().getData()[0].UNIT === '%') {
@@ -297,16 +306,18 @@
       };
     }
 
-    //Whether the chart is a percentage chart
+    //If the chart is in percentage mode, the maximum value should be 100%
     if (isPercentage) {
       maxYValue = 100;
     }
 
-    //    console.log(oChart.getId(), nMaxValueYAxis);
+    //console.log(oChart.getId(), nMaxValueYAxis);
 
+    //set final minimum&maximum values
     minYValue = Math.floor(minYValue);
     maxYValue = Math.ceil(maxYValue);
 
+    //create new scale based on new value range
     var oYAxisScale = new sap.viz.ui5.types.Axis_scale({
       minValue: fixMin ? nMinValueYAxis : minYValue,
       maxValue: fixMax ? nMaxValueYAxis : maxYValue
@@ -329,9 +340,14 @@
     }
   };
   
+  /**
+   * setChartPercentageYAxisScale - set scale for percentage chart
+   * @param {vizchart} oChart - the kpi/dimension/defect chart
+   */
   function setChartPercentageYAxisScale(oChart) {
     var oYAxis = oChart.getYAxis();
 
+    //set default yaxis scale
     var oYAxisScale = new sap.viz.ui5.types.Axis_scale({
       minValue: 0,
       maxValue: 100
@@ -343,6 +359,10 @@
 
   };
   
+  /**
+   * setChartPercentageYAxis2Scale - set yaxis scale for the second yaxis.
+   * @param {vizchart} oChart - the kpi/dimension/defect double yaxis
+   */
   function setChartPercentageYAxis2Scale(oChart) {
 	    var oYAxis = oChart.getYAxis();
 
@@ -357,10 +377,16 @@
 
 	  };
 
-
+/**
+ * setYAxisScale - set yaxis scale for not-percentage chart
+ * @param {vizchart} oChart - KPI/dimension/defect chart
+ * @param {Integer} min    - the minimum yaxis value
+ * @param {Integer} max    - the maximum yaxis value
+ */
   function setYAxisScale(oChart, min, max) {
     var oYAxis = oChart.getYAxis();
 
+    //create new scale for oChart
     var oYAxisScale = new sap.viz.ui5.types.Axis_scale({
       minValue: min,
       maxValue: max
@@ -449,29 +475,36 @@
 
     /*
      * Get max|min kpi value of the array
+     * key - the field that need to sort, e.g. 'P_VALUE'
      * */
     var getMValue = function (valueArry, key) {
       var max = null,
         min = null;
       for (var i = 0; i < valueArry.length; i++) {
+        //if no value of the field 
         if (valueArry[i][key] === undefined) {
           continue;
         }
+        //init max value
         if (max === null) {
           max = parseFloat(valueArry[i][key]);
         }
+        //set new max value
         if (max !== null && max < parseFloat(valueArry[i][key])) {
           max = parseFloat(valueArry[i][key]);
         }
+        //init min value
         if (min === null) {
           min = parseFloat(valueArry[i][key]);
         }
+        //set new min value
         if (min !== null && min > parseFloat(valueArry[i][key])) {
           min = parseFloat(valueArry[i][key]);
         }
 
       }
 
+      //return max&min values
       return {
         MAX: max,
         MIN: min
@@ -494,8 +527,10 @@
     var sortBys = [];
 
     for (var i = 0; i < measures.length; i++) {
+      //get group of measures
       var group = measures[i].getGroup() - 1;
       if (sortBys[group] === undefined) sortBys[group] = [];
+      //put corresponding field name into sortBys array
       sortBys[group].push(measures[i].mBindingInfos.value.binding.sPath);
     }
 
@@ -504,9 +539,11 @@
     var max, min;
     var tmpMValue = {};
 
+    //loop all fields
     for (var i = 0; i < sortBys.length; i++) {
       var sortBy = sortBys[i];
 
+      //always compare with the max&min of the first field
       max = getMValue(oData, sortBy[0]).MAX;
       min = getMValue(oData, sortBy[0]).MIN;
       tmpMValue = {};
@@ -516,25 +553,31 @@
         if (max < tmpMValue.MAX && tmpMValue.MAX !==null) {  
           max = tmpMValue.MAX;
         }
+        //find and set minimum value
         if (min > tmpMValue.MIN && tmpMValue.MIN !==null) {
           min = tmpMValue.MIN;
         }
       }
 
+      //set min&max values of field i
       maxs[i] = max;
       mins[i] = min;
     }
 
+    //if need to sort more than one field
     if (sortBys.length > 1) {
+      //set all pairs of max/min
       mins[0] = Math.floor(mins[0]);
       maxs[0] = Math.ceil(maxs[0]) + 1;
       mins[1] = Math.floor(mins[1]);
       maxs[1] = Math.ceil(maxs[1] + 1);
+      //set mins&maxs for scale of dual chart
       huawei.cmes.util.chart.Helper.setChartYAxisScale(oChart, mins[0], maxs[
         0], mins[1], maxs[1]);
     } else {
       if (oData[0].UNIT !== undefined) {
         if (oData[0].UNIT === "%") {
+          //if the chart is percentage mode, change the format of max&min
           var distance = maxs[0] - mins[0];
           var distanceUnit = getUnit(distance);
           if (100 - maxs[0] < distanceUnit) {
@@ -542,87 +585,108 @@
           }
         }
       }
+      //set min&max for scale of chart
       mins[0] = Math.floor(mins[0]);
       maxs[0] = Math.ceil(maxs[0]);
 
       huawei.cmes.util.chart.Helper.setChartYAxisScale(oChart, mins[0],
         maxs[0], '', '', false, false);
-
     }
 
   };
 
 
   huawei.cmes.util.chart.Helper.getNewXAxis = getNewXAxis;
-
+  /**
+   * getNewXAxis - adjust the xaxis to avoid empty data for some date point 
+   * @param  {String} period - the granularity of time
+   * @param  {String} start  [description]
+   * @param  {String} end    [description]
+   * @return {Array}   the array contains all xaxis values, e.g. ['2015-01','2015-02'...]
+   */
   function getNewXAxis(period, start, end) {
     var xAxis = [],
-      curDate;
+      curDate;//display date on xaxis
     start = new Date(start);
     end = new Date(end);
 
-
+    //get the week number of the date
+    //the week start on Monday
     Date.prototype.getWeekOfYear = function () {
       var weekStart = 1;
       weekStart = (weekStart || 1) - 0;
       if (isNaN(weekStart) || weekStart > 7)
         weekStart = 1;
 
+      //get the first date of the year of Date
       var firstDate = new Date(this.getFullYear(), 0, 1);
+      //get the first week date of the year of Date
       var firstWeekDays = 7 - firstDate.getDay() + weekStart;
+      //get the day of the year
       var dayOfYear = (((new Date(this.getFullYear(), this.getMonth(), this.getDate())) -
         firstDate) / (24 * 3600 * 1000)) + 1;
+      //get the No. of the week the Date is in
       var week = Math.ceil((dayOfYear - firstWeekDays) / 7) + 1;
       return week;
     };
 
     switch (period) {
-    case 'DAY':
+    case 'DAY'://get dates under 'DAY' granularity
       while (start.getDate() !== end.getDate()) {
         curDate = start.getFullYear() + "-" + (start.getMonth() + 1) + "-" +
           start.getDate();
         xAxis.push(curDate);
+        //get next date as start date
         start.setDate(start.getDate() + 1);
       }
       curDate = end.getFullYear() + "-" + (end.getMonth() + 1) + "-" + end.getDate();
       xAxis.push(curDate);
       break;
 
-    case 'YEAR':
+    case 'YEAR'://get dates under 'YEAR' granularity
       while (start.getFullYear() !== end.getFullYear()) {
         curDate = start.getFullYear().toString();
         xAxis.push(curDate);
+        //get next year as start year
         start.setFullYear(start.getFullYear() + 1);
       }
       curDate = end.getFullYear().toString();
       xAxis.push(curDate);
       break;
 
-    case 'MONTH':
+    case 'MONTH'://get dates under 'MONTH' granularity
       var month;
       while (start.getMonth() !== end.getMonth()) {
+        //adjust month format
         month = start.getMonth() + 1 > 9 ? start.getMonth() + 1 : "0" + (
           start.getMonth() + 1);
         curDate = start.getFullYear() + "-" + month;
         xAxis.push(curDate);
+        //get next month as start date
         HELPER.getNextMonth(start);
       }
+      //adjust month format
       month = end.getMonth() + 1 > 9 ? end.getMonth() + 1 : "0" + (end.getMonth() +
         1);
       curDate = end.getFullYear() + "-" + month;
       xAxis.push(curDate);
       break;
 
-    case 'WEEK':
+    case 'WEEK'://get dates under 'WEEK' granularity
+      //get start & end week
       var sWeek = start.getWeekOfYear();
       var eWeek = end.getWeekOfYear();
       var week;
+
       while (sWeek !== eWeek) {
         week = start.getWeekOfYear();
         if (week === 53) {
+        // in the most of the situation,when comes to the CW53, it overlaps with CW1 of next year
           week = 1;
           curDate = start.getFullYear() + 1 + "-" + week + "W";
+          //set CW1 in next year as next date
           start.setDate(start.getDate() + 7);
+          //if cw1 is not the next week number, change it back 
           if (start.getWeekOfYear() !== week) {
             start.setDate(start.getDate() - 7);
           }
@@ -630,11 +694,15 @@
           curDate = start.getFullYear() + "-" + week + "W";
         }
 
+        //add new display date into xaxis
         xAxis.push(curDate);
-
+        //move to next week
         start.setDate(start.getDate() + 7);
+        //set new start week
         sWeek = start.getWeekOfYear();
       }
+      //when comes to the end date
+      //set end date in display fomart and add it into xaxis
       curDate = end.getFullYear() + "-" + eWeek + "W";
       xAxis.push(curDate);
       break;
@@ -650,11 +718,15 @@
 
   huawei.cmes.util.chart.Helper.adjustChartPeriod = adjustChartPeriod;
   /**
-   * Functionality: Set the xaxis range based on the date period
+   * Functionality: Adjust the xaxis range based on the date period
+   * The xaxis will cover all data point between start & end point although lack of backend data
+   * e.g. if we need draw chart from 2015-01 ~ 2015-05, period: month, and only data of 2015-02, 2015-04 store at backend
+   * The function will generate fake emtpy data for 2015-01,2015-03,2015-05 for chart display, no effect on data
    * Parameters :
    * 1. period e.g. DAY,MONTH,YEAR,WEEK
    * 2. start date/end date : yyyy-MM-dd
    * 3. oChart: adjust the xaxis for oChart
+   * 4. field: the field for yaxis show
    */
   function adjustChartPeriod(period, start, end, oChart, field) {
     var oData = oChart.getModel().oData;
@@ -666,21 +738,29 @@
         return;
       }
     }
+    //get model data
     oData = huawei.cmes.util.commons.Helper.deepClone(oData);
 
     var dimensions = oChart.getDataset().getDimensions();
+    //get the corresponding field that maps to xaxis
     var xaxisPath = dimensions[0].mBindingInfos.value.binding.sPath;
 
+    //get new xAxis
+    //will merge the dates with the model data
     var xAxis = this.getNewXAxis(period, start, end);
 
-    var result = [],
-      added = [];
+    var result = [], //record the final result
+      added = []; //record xaxis value that added to the result
 
+    //loop model data to see whether the data covers all values in new xAxis
     for (var i = 0; i < oData.length; i++) {
       if (xAxis.length === 0) {
         break;
+        //xAxis is empyt, which means all xaxis values are covered by the model data
+        //even the loop is not finish, just break
       }
       if (added.indexOf(oData[i].PERIOD) < 0) {
+        //if no data the first date in xAxis, create a fake data item for occupation
         if (oData[i][xaxisPath] !== xAxis[0]) {
           var obj = {};
           obj[xaxisPath] = xAxis[0];
@@ -691,16 +771,23 @@
           result.push(obj);
           i--;
         } else {
+          //else put the original item into result
           result.push(oData[i]);
         }
+        //add xaxis value to added array
         added.push(xAxis[0]);
+        //remove the first item of the xAxis
         xAxis.shift();
       } else {
+        //if the xaxis value is covered/existed in model data, just copy
         result.push(oData[i]);
       }
     }
 
+    //mark the index that the loop ends to get the start index of the next step
     var lastChecked = i < oData.length ? i : i - 1;
+    //if the loop of model data is finished, but still leave un-covered xaxis values
+    //we just need to create fakes data to cover them
     while (xAxis.length !== 0) {
       var obj = {};
       obj[xaxisPath] = xAxis[0];
@@ -708,15 +795,20 @@
       if (oData[lastChecked]["UNIT"] !== undefined) {
         obj["UNIT"] = oData[lastChecked]["UNIT"];
       }
+      //add the fake data into the final result
       result.push(obj);
+      //remove the xaxis value from xAxis array
       xAxis.shift();
     }
 
+    //after the while-loop above, all xaxis values are covered.
+    //if there still are values in the model data, just copy
     if (i < oData.length) {
       var restData = oData.slice(i);
       result = result.concat(restData);
     }
 
+    //set new model data
     oChart.getModel().setData(result);
   };
 
